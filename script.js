@@ -108,9 +108,11 @@ async function initializeFFmpeg() {
         if (!FFmpegClass && FFmpeg.createFFmpeg) {
             // Older API: use createFFmpeg
             ffmpeg = FFmpeg.createFFmpeg({ log: false });
+            ffmpeg._oldAPI = true;
         } else if (FFmpegClass) {
             // Newer API: use FFmpeg class
             ffmpeg = new FFmpegClass();
+            ffmpeg._oldAPI = false;
         } else {
             return setTimeout(initializeFFmpeg, 100);
         }
@@ -119,6 +121,13 @@ async function initializeFFmpeg() {
         
         await ffmpeg.load();
         ffmpegReady = true;
+        
+        // Log available methods for debugging
+        console.log('FFmpeg loaded. API type:', ffmpeg._oldAPI ? 'old (createFFmpeg)' : 'new (FFmpeg class)');
+        console.log('FFmpeg methods:', Object.keys(ffmpeg));
+        if (ffmpeg.FS) {
+            console.log('FS methods:', Object.keys(ffmpeg.FS));
+        }
     } catch (error) {
         const errorMsg = error.message || String(error);
         
@@ -2194,6 +2203,48 @@ async function encodeToMP4(frames, duration, onProgress) {
 
     const framerate = 30;
     const totalFrames = frames.length;
+    
+    // Determine which API to use
+    const useOldAPI = ffmpeg._oldAPI;
+    
+    // Helper functions for file operations
+    const writeFile = (name, data) => {
+        if (useOldAPI) {
+            ffmpeg.FS('writeFile', name, data);
+        } else if (ffmpeg.FS && typeof ffmpeg.FS.writeFile === 'function') {
+            ffmpeg.FS.writeFile(name, data);
+        } else if (ffmpeg.FS && typeof ffmpeg.FS === 'function') {
+            ffmpeg.FS('writeFile', name, data);
+        } else {
+            throw new Error('No writeFile method available');
+        }
+    };
+    
+    const readFile = (name) => {
+        if (useOldAPI) {
+            return ffmpeg.FS('readFile', name);
+        } else if (ffmpeg.FS && typeof ffmpeg.FS.readFile === 'function') {
+            return ffmpeg.FS.readFile(name);
+        } else if (ffmpeg.FS && typeof ffmpeg.FS === 'function') {
+            return ffmpeg.FS('readFile', name);
+        } else {
+            throw new Error('No readFile method available');
+        }
+    };
+    
+    const unlinkFile = (name) => {
+        try {
+            if (useOldAPI) {
+                ffmpeg.FS('unlink', name);
+            } else if (ffmpeg.FS && typeof ffmpeg.FS.unlink === 'function') {
+                ffmpeg.FS.unlink(name);
+            } else if (ffmpeg.FS && typeof ffmpeg.FS === 'function') {
+                ffmpeg.FS('unlink', name);
+            }
+        } catch (e) {
+            // Ignore cleanup errors
+        }
+    };
 
     // Write frames to FFmpeg as raw video
     for (let i = 0; i < totalFrames; i++) {
@@ -2218,9 +2269,9 @@ async function encodeToMP4(frames, duration, onProgress) {
         fileData.set(headerBytes);
         fileData.set(rgbData, headerBytes.length);
 
-        // Use FS API to write file
+        // Write file
         try {
-            ffmpeg.FS.writeFile(fileName, fileData);
+            writeFile(fileName, fileData);
         } catch (error) {
             console.error('WriteFile error details:', error);
             throw new Error(`Failed to write file: ${error.message}`);
@@ -2251,7 +2302,7 @@ async function encodeToMP4(frames, duration, onProgress) {
     // Read output video file
     let videoData;
     try {
-        videoData = ffmpeg.FS.readFile('output.mp4');
+        videoData = readFile('output.mp4');
     } catch (error) {
         console.error('ReadFile error details:', error);
         throw new Error(`Failed to read video file: ${error.message}`);
@@ -2260,18 +2311,10 @@ async function encodeToMP4(frames, duration, onProgress) {
     const videoBlob = new Blob([videoData.buffer || videoData], { type: 'video/mp4' });
 
     // Clean up FFmpeg filesystem
-    const deleteFile = (name) => {
-        try {
-            ffmpeg.FS.unlink(name);
-        } catch (e) {
-            // Ignore cleanup errors
-        }
-    };
-
-    deleteFile('output.mp4');
+    unlinkFile('output.mp4');
     for (let i = 0; i < totalFrames; i++) {
         const fileName = `frame_${String(i).padStart(6, '0')}.ppm`;
-        deleteFile(fileName);
+        unlinkFile(fileName);
     }
 
     return videoBlob;
