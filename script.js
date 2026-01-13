@@ -3153,7 +3153,481 @@ async function generateVideoFromVideo(videoPath, onProgress) {
 }
 
 /**
- * Generate video from current image
+ * Generate video from video source with chunked processing to avoid memory issues
+ * Processes frames in 1/8th chunks, encodes each immediately, then concatenates
+ */
+async function generateVideoFromVideoChunked(videoPath, onProgress) {
+    try {
+        const video = document.createElement('video');
+        video.crossOrigin = 'anonymous';
+        video.loop = true;
+        
+        let videoWidth, videoHeight, videoDuration;
+        
+        video.onerror = () => {
+            throw new Error('Failed to load video');
+        };
+        
+        // Wait for metadata to load
+        video.src = videoPath;
+        await new Promise((resolve) => {
+            video.onloadedmetadata = () => {
+                videoWidth = video.videoWidth;
+                videoHeight = video.videoHeight;
+                videoDuration = video.duration;
+                resolve();
+            };
+        });
+
+        currentAspectRatio = videoWidth / videoHeight;
+        
+        const fontSize = getEffectiveFontSize(exportWidth, currentCharWidth);
+        const outputHeight = Math.round(exportWidth / currentAspectRatio);
+        const charHeight = Math.round(outputHeight / fontSize / 1.2);
+        
+        // Get desired output duration from UI (default 5 seconds)
+        const outputDuration = parseInt(document.getElementById('durationInput').value) || 5;
+        const videoFPS = 30;
+        const totalFrames = outputDuration * videoFPS;
+        
+        // Pre-analyze audio if sound reactive is enabled
+        let audioLevelPerFrame = [];
+        if (soundReactiveEnabled && audioBuffer) {
+            const audioLength = audioBuffer.length;
+            const framesPerAudioSample = audioLength / totalFrames;
+            
+            for (let i = 0; i < totalFrames; i++) {
+                const sampleIndex = Math.floor(i * framesPerAudioSample);
+                const endIndex = Math.min(sampleIndex + Math.floor(framesPerAudioSample), audioLength);
+                
+                let sum = 0;
+                const channelData = audioBuffer.getChannelData(0);
+                
+                for (let j = sampleIndex; j < endIndex; j++) {
+                    sum += Math.abs(channelData[j]);
+                }
+                
+                const average = (endIndex - sampleIndex > 0) ? sum / (endIndex - sampleIndex) : 0;
+                audioLevelPerFrame[i] = Math.min(1, average * 2);
+            }
+        }
+
+        const helpers = getFFmpegHelpers();
+        
+        // Calculate chunk parameters
+        const numChunks = 8;
+        const chunkSize = Math.ceil(totalFrames / numChunks);
+        const chunkNames = [];
+        
+        console.log(`Chunked video processing: ${totalFrames} frames in ${numChunks} chunks of ~${chunkSize} frames`);
+
+        // Process each chunk
+        for (let chunkIndex = 0; chunkIndex < numChunks; chunkIndex++) {
+            const chunkStart = chunkIndex * chunkSize;
+            const chunkEnd = Math.min(chunkStart + chunkSize, totalFrames);
+            const chunkFrameCount = chunkEnd - chunkStart;
+            
+            if (chunkFrameCount <= 0) break;
+
+            console.log(`Processing chunk ${chunkIndex + 1}/${numChunks}: frames ${chunkStart}-${chunkEnd - 1}`);
+            
+            const chunkFrames = [];
+
+            // Process frames in this chunk
+            for (let frameIndex = chunkStart; frameIndex < chunkEnd; frameIndex++) {
+                // Calculate time in video, looping if necessary
+                const time = (frameIndex / videoFPS) % videoDuration;
+                video.currentTime = time;
+                
+                // Get current audio level for this frame
+                let currentAudioLevelForFrame = 0;
+                if (soundReactiveEnabled && audioLevelPerFrame[frameIndex] !== undefined) {
+                    currentAudioLevelForFrame = audioLevelPerFrame[frameIndex];
+                }
+                
+                // Calculate sound reactive effects
+                let asciiResolutionForFrame = currentCharWidth;
+                let asciiBrightnessForFrame = brightness;
+                let asciiContrastForFrame = contrast;
+                let asciiOpacityForFrame = opacity;
+                let overlaySizeForFrame = overlaySize;
+                let overlayBrightnessForFrame = overlayBrightness;
+                let overlayContrastForFrame = overlayContrast;
+                let overlayOpacityForFrame = overlayOpacity;
+                
+                if (soundReactiveEnabled && asciiResolutionChange !== 0) {
+                    asciiResolutionForFrame = Math.max(10, currentCharWidth + (asciiResolutionChange * currentAudioLevelForFrame * volumeSensitivity));
+                }
+                if (soundReactiveEnabled && asciiBrightnessChange !== 0) {
+                    asciiBrightnessForFrame = brightness + (asciiBrightnessChange * currentAudioLevelForFrame * volumeSensitivity);
+                }
+                if (soundReactiveEnabled && asciiContrastChange !== 0) {
+                    asciiContrastForFrame = Math.max(0, contrast + (asciiContrastChange * currentAudioLevelForFrame * volumeSensitivity));
+                }
+                if (soundReactiveEnabled && asciiOpacityChange !== 0) {
+                    asciiOpacityForFrame = Math.max(0, Math.min(100, opacity + (asciiOpacityChange * currentAudioLevelForFrame * volumeSensitivity)));
+                }
+                if (soundReactiveEnabled && overlaySizeChange !== 0) {
+                    overlaySizeForFrame = Math.max(50, overlaySize + (overlaySizeChange * currentAudioLevelForFrame * volumeSensitivity));
+                }
+                if (soundReactiveEnabled && overlayBrightnessChange !== 0) {
+                    overlayBrightnessForFrame = overlayBrightness + (overlayBrightnessChange * currentAudioLevelForFrame * volumeSensitivity);
+                }
+                if (soundReactiveEnabled && overlayContrastChange !== 0) {
+                    overlayContrastForFrame = Math.max(0, overlayContrast + (overlayContrastChange * currentAudioLevelForFrame * volumeSensitivity));
+                }
+                if (soundReactiveEnabled && overlayOpacityChange !== 0) {
+                    overlayOpacityForFrame = Math.max(0, Math.min(100, overlayOpacity + (overlayOpacityChange * currentAudioLevelForFrame * volumeSensitivity)));
+                }
+                
+                // Wait for frame to load and process
+                await new Promise((resolve) => {
+                    let seekHandler = null;
+                    const timeout = setTimeout(() => {
+                        if (seekHandler) video.removeEventListener('seeked', seekHandler);
+                        video.play().catch(() => {});
+                        resolve();
+                    }, 200);
+                    
+                    seekHandler = () => {
+                        clearTimeout(timeout);
+                        video.removeEventListener('seeked', seekHandler);
+                        
+                        const canvas = document.createElement('canvas');
+                        canvas.width = videoWidth;
+                        canvas.height = videoHeight;
+                        
+                        const ctx = canvas.getContext('2d');
+                        ctx.drawImage(video, 0, 0);
+                        
+                        const frameData = ctx.getImageData(0, 0, videoWidth, videoHeight);
+                        
+                        // Convert frame to ASCII
+                        let asciiFrame;
+                        
+                        if (currentMode === 'original') {
+                            asciiFrame = convertFrameToASCII(frameData, asciiResolutionForFrame, charHeight);
+                        } else if (currentMode === 'scroll') {
+                            asciiFrame = convertFrameToASCII(frameData, asciiResolutionForFrame, charHeight);
+                        } else if (currentMode === 'zoom') {
+                            const cycleDurationSeconds = 3;
+                            const timeInVid = frameIndex / videoFPS;
+                            const progress = (timeInVid % cycleDurationSeconds) / cycleDurationSeconds;
+                            const zoomCharWidth = getZoomCharWidth(progress);
+                            const zoomCharHeight = Math.round(zoomCharWidth / currentAspectRatio);
+                            asciiFrame = convertFrameToASCII(frameData, zoomCharWidth, zoomCharHeight);
+                        } else if (currentMode === 'dither') {
+                            asciiFrame = convertFrameToASCIIDither(frameData, asciiResolutionForFrame, charHeight);
+                        } else if (currentMode === 'glitch') {
+                            const effectiveFrame = Math.floor(frameIndex * currentFPS / videoFPS);
+                            asciiFrame = convertFrameToASCIIGlitch(frameData, asciiResolutionForFrame, charHeight, effectiveFrame);
+                        } else {
+                            asciiFrame = convertFrameToASCII(frameData, asciiResolutionForFrame, charHeight);
+                        }
+                        
+                        // Render ASCII frame
+                        const tempVideoCanvas = document.createElement('canvas');
+                        tempVideoCanvas.width = exportWidth;
+                        tempVideoCanvas.height = outputHeight;
+                        
+                        const tempCtx = tempVideoCanvas.getContext('2d');
+                        tempCtx.fillStyle = '#000000';
+                        tempCtx.fillRect(0, 0, exportWidth, outputHeight);
+                        
+                        // Store original effect values
+                        const origBrightness = brightness;
+                        const origContrast = contrast;
+                        const origOpacity = opacity;
+                        
+                        // Apply sound reactive ASCII effects
+                        brightness = asciiBrightnessForFrame;
+                        contrast = asciiContrastForFrame;
+                        opacity = asciiOpacityForFrame;
+                        
+                        if (currentMode === 'flag') {
+                            const cycleDurationSeconds = 3;
+                            const timeInVid = frameIndex / videoFPS;
+                            const flagProgress = (timeInVid % cycleDurationSeconds) / cycleDurationSeconds;
+                            renderASCIIFrameWithFlag(asciiFrame, tempVideoCanvas, fontSize, charHeight, flagProgress);
+                        } else if (currentMode === 'scroll') {
+                            const effectiveFrame = Math.floor(frameIndex * currentFPS / videoFPS);
+                            const shiftedFrame = shiftASCIIFrame(asciiFrame, effectiveFrame % currentCharWidth);
+                            renderASCIIFrame(shiftedFrame, tempVideoCanvas, fontSize, charHeight);
+                        } else if (currentMode === 'zoom') {
+                            const cycleDurationSeconds = 30 / currentFPS;
+                            const timeInVid = frameIndex / videoFPS;
+                            const progress = (timeInVid % cycleDurationSeconds) / cycleDurationSeconds;
+                            const zoomCharWidth = getZoomCharWidth(progress);
+                            const zoomCharHeight = Math.round(zoomCharWidth / currentAspectRatio);
+                            renderASCIIFrame(asciiFrame, tempVideoCanvas, fontSize, zoomCharHeight);
+                        } else {
+                            renderASCIIFrame(asciiFrame, tempVideoCanvas, fontSize, charHeight);
+                        }
+                        
+                        // Restore original effects
+                        brightness = origBrightness;
+                        contrast = origContrast;
+                        opacity = origOpacity;
+                        
+                        // Render overlay if enabled
+                        if (overlayEnabled && overlayImageData) {
+                            const origOverlaySize = overlaySize;
+                            const origOverlayBrightness = overlayBrightness;
+                            const origOverlayContrast = overlayContrast;
+                            const origOverlayOpacity = overlayOpacity;
+                            
+                            overlaySize = overlaySizeForFrame;
+                            overlayBrightness = overlayBrightnessForFrame;
+                            overlayContrast = overlayContrastForFrame;
+                            overlayOpacity = overlayOpacityForFrame;
+                            
+                            renderOverlayToCanvas(tempCtx, exportWidth, outputHeight);
+                            
+                            overlaySize = origOverlaySize;
+                            overlayBrightness = origOverlayBrightness;
+                            overlayContrast = origOverlayContrast;
+                            overlayOpacity = origOverlayOpacity;
+                        }
+                        
+                        chunkFrames.push(tempCtx.getImageData(0, 0, exportWidth, outputHeight));
+                        
+                        // Update progress: 0-70% for frame generation
+                        const overallProgress = (frameIndex / totalFrames) * 70;
+                        onProgress(Math.round(overallProgress));
+                        resolve();
+                    };
+                    
+                    video.addEventListener('seeked', seekHandler, { once: true });
+                });
+            }
+
+            // Encode this chunk immediately
+            const chunkName = await encodeChunkToMP4(chunkFrames, chunkIndex, exportWidth, outputHeight, helpers);
+            chunkNames.push(chunkName);
+            
+            // Clear chunk frames from memory
+            chunkFrames.length = 0;
+            
+            // Allow garbage collection between chunks
+            await new Promise(resolve => setTimeout(resolve, 10));
+        }
+
+        // Concatenate all chunks
+        onProgress(75);
+        const videoBlob = await concatenateChunks(chunkNames, helpers);
+        window.generatedVideoBlob = videoBlob;
+
+        onProgress(100);
+        showStatus('Video generated successfully! Click "Download Video" to save.', 'success');
+        document.getElementById('downloadButton').style.display = 'inline-block';
+
+    } catch (error) {
+        console.error('Error generating video:', error);
+        showStatus(`Error: ${error.message}`, 'error');
+    } finally {
+        isProcessing = false;
+        const progressSection = document.getElementById('progressSection');
+        const actionSection = document.getElementById('actionSection');
+        progressSection.style.display = 'none';
+        actionSection.style.display = 'block';
+        document.getElementById('generateButton').disabled = false;
+        
+        if (currentImageData) {
+            generatePreview();
+        }
+    }
+}
+
+/**
+ * Generate a single frame for video export
+ * Extracted to reduce duplication and enable chunked processing
+ */
+function generateSingleFrame(frameIndex, params) {
+    const {
+        totalFrames, framerate, videoWidth, videoHeight, fontSize, charHeight,
+        baseASCIIFrame, audioLevelPerFrame, cachedASCIIFrameRef
+    } = params;
+
+    // Get current audio level for this frame
+    let currentAudioLevelForFrame = 0;
+    if (soundReactiveEnabled && audioLevelPerFrame[frameIndex] !== undefined) {
+        currentAudioLevelForFrame = audioLevelPerFrame[frameIndex];
+    }
+    
+    // Calculate sound reactive effects for this frame
+    let asciiResolutionForFrame = currentCharWidth;
+    let asciiBrightnessForFrame = brightness;
+    let asciiContrastForFrame = contrast;
+    let asciiOpacityForFrame = opacity;
+    let asciiHueForFrame = hue;
+    let asciiSaturationForFrame = saturation;
+    let overlaySizeForFrame = overlaySize;
+    let overlayBrightnessForFrame = overlayBrightness;
+    let overlayContrastForFrame = overlayContrast;
+    let overlayOpacityForFrame = overlayOpacity;
+    let overlayXForFrame = overlayX;
+    let overlayYForFrame = overlayY;
+    
+    if (soundReactiveEnabled && asciiResolutionChange !== 0) {
+        asciiResolutionForFrame = Math.max(10, currentCharWidth + (asciiResolutionChange * currentAudioLevelForFrame * volumeSensitivity));
+    }
+    if (soundReactiveEnabled && asciiBrightnessChange !== 0) {
+        asciiBrightnessForFrame = brightness + (asciiBrightnessChange * currentAudioLevelForFrame * volumeSensitivity);
+    }
+    if (soundReactiveEnabled && asciiContrastChange !== 0) {
+        asciiContrastForFrame = Math.max(0, contrast + (asciiContrastChange * currentAudioLevelForFrame * volumeSensitivity));
+    }
+    if (soundReactiveEnabled && asciiOpacityChange !== 0) {
+        asciiOpacityForFrame = Math.max(0, Math.min(100, opacity + (asciiOpacityChange * currentAudioLevelForFrame * volumeSensitivity)));
+    }
+    if (soundReactiveEnabled && asciiHueShift !== 0) {
+        asciiHueForFrame = hue + (asciiHueShift * currentAudioLevelForFrame * volumeSensitivity);
+    }
+    if (soundReactiveEnabled && asciiSaturationChange !== 0) {
+        asciiSaturationForFrame = Math.max(0, saturation + (asciiSaturationChange * currentAudioLevelForFrame * volumeSensitivity));
+    }
+    if (soundReactiveEnabled && overlaySizeChange !== 0) {
+        overlaySizeForFrame = Math.max(50, overlaySize + (overlaySizeChange * currentAudioLevelForFrame * volumeSensitivity));
+    }
+    if (soundReactiveEnabled && overlayBrightnessChange !== 0) {
+        overlayBrightnessForFrame = overlayBrightness + (overlayBrightnessChange * currentAudioLevelForFrame * volumeSensitivity);
+    }
+    if (soundReactiveEnabled && overlayContrastChange !== 0) {
+        overlayContrastForFrame = Math.max(0, overlayContrast + (overlayContrastChange * currentAudioLevelForFrame * volumeSensitivity));
+    }
+    if (soundReactiveEnabled && overlayOpacityChange !== 0) {
+        overlayOpacityForFrame = Math.max(0, Math.min(100, overlayOpacity + (overlayOpacityChange * currentAudioLevelForFrame * volumeSensitivity)));
+    }
+    if (soundReactiveEnabled && overlayXChange !== 0) {
+        overlayXForFrame = overlayX + (overlayXChange * currentAudioLevelForFrame * volumeSensitivity / videoWidth * 100);
+    }
+    if (soundReactiveEnabled && overlayYChange !== 0) {
+        overlayYForFrame = overlayY + (overlayYChange * currentAudioLevelForFrame * volumeSensitivity / videoHeight * 100);
+    }
+    
+    // Get ASCII frame for this mode
+    let asciiFrame = null;
+    let renderCharHeight = charHeight;
+    
+    if (currentMode === 'original') {
+        // Match preview timing: regenerate at currentFPS rate
+        const framesPerASCIIUpdate = Math.max(1, Math.round(framerate / currentFPS));
+        if (frameIndex % framesPerASCIIUpdate === 0) {
+            asciiFrame = convertFrameToASCII(currentImageData, asciiResolutionForFrame, charHeight);
+            cachedASCIIFrameRef.value = asciiFrame;
+        } else {
+            asciiFrame = cachedASCIIFrameRef.value;
+        }
+    } else if (currentMode === 'scroll') {
+        // Match preview timing: one character shift per currentFPS frame
+        const effectiveFrame = Math.floor(frameIndex * currentFPS / framerate);
+        asciiFrame = shiftASCIIFrame(baseASCIIFrame, effectiveFrame % currentCharWidth);
+    } else if (currentMode === 'zoom') {
+        // Match preview timing: 30 frames at currentFPS = cycle duration in seconds
+        const cycleDurationSeconds = 30 / currentFPS;
+        const timeInVideo = frameIndex / framerate; // Current time in seconds
+        const progress = (timeInVideo % cycleDurationSeconds) / cycleDurationSeconds;
+        const zoomCharWidth = getZoomCharWidth(progress);
+        renderCharHeight = Math.round(zoomCharWidth / currentAspectRatio);
+        asciiFrame = convertFrameToASCII(currentImageData, zoomCharWidth, renderCharHeight);
+    } else if (currentMode === 'flag') {
+        // Flag mode: static ASCII with waving animation (loops continuously)
+        if (frameIndex === 0 || !cachedASCIIFrameRef.value) {
+            asciiFrame = convertFrameToASCII(currentImageData, asciiResolutionForFrame, charHeight);
+            cachedASCIIFrameRef.value = asciiFrame;
+        } else {
+            asciiFrame = cachedASCIIFrameRef.value;
+        }
+    } else if (currentMode === 'dither') {
+        // Dither mode: static ASCII with ordered dithering pattern
+        if (frameIndex === 0 || !cachedASCIIFrameRef.value) {
+            asciiFrame = convertFrameToASCIIDither(currentImageData, asciiResolutionForFrame, charHeight);
+            cachedASCIIFrameRef.value = asciiFrame;
+        } else {
+            asciiFrame = cachedASCIIFrameRef.value;
+        }
+    } else if (currentMode === 'glitch') {
+        // Glitch mode: match preview timing by using effective frame count at currentFPS
+        const effectiveFrame = Math.floor(frameIndex * currentFPS / framerate);
+        asciiFrame = convertFrameToASCIIGlitch(currentImageData, asciiResolutionForFrame, charHeight, effectiveFrame);
+    }
+
+    // Render frame to temporary canvas
+    const tempVideoCanvas = document.createElement('canvas');
+    tempVideoCanvas.width = videoWidth;
+    tempVideoCanvas.height = videoHeight;
+    
+    const ctx = tempVideoCanvas.getContext('2d');
+    ctx.fillStyle = '#000000';
+    ctx.fillRect(0, 0, videoWidth, videoHeight);
+    
+    // Store original effect values
+    const origBrightness = brightness;
+    const origContrast = contrast;
+    const origOpacity = opacity;
+    const origHue = hue;
+    const origSaturation = saturation;
+    
+    // Apply sound reactive ASCII effects
+    brightness = asciiBrightnessForFrame;
+    contrast = asciiContrastForFrame;
+    opacity = asciiOpacityForFrame;
+    hue = asciiHueForFrame;
+    saturation = asciiSaturationForFrame;
+    
+    // Use flag rendering for flag mode, normal rendering for others
+    if (currentMode === 'flag') {
+        // Match preview timing: 3 second cycle
+        const cycleDurationSeconds = 3;
+        const timeInVideo = frameIndex / framerate; // Current time in seconds
+        const flagProgress = (timeInVideo % cycleDurationSeconds) / cycleDurationSeconds;
+        renderASCIIFrameWithFlag(asciiFrame, tempVideoCanvas, fontSize, renderCharHeight, flagProgress);
+    } else {
+        renderASCIIFrame(asciiFrame, tempVideoCanvas, fontSize, renderCharHeight);
+    }
+    
+    // Restore original effects
+    brightness = origBrightness;
+    contrast = origContrast;
+    opacity = origOpacity;
+    hue = origHue;
+    saturation = origSaturation;
+    
+    // Render overlay image on top if enabled
+    if (overlayEnabled && overlayImageData) {
+        // Store original overlay values
+        const origOverlaySize = overlaySize;
+        const origOverlayBrightness = overlayBrightness;
+        const origOverlayContrast = overlayContrast;
+        const origOverlayOpacity = overlayOpacity;
+        const origOverlayX = overlayX;
+        const origOverlayY = overlayY;
+        
+        // Apply sound reactive overlay effects
+        overlaySize = overlaySizeForFrame;
+        overlayBrightness = overlayBrightnessForFrame;
+        overlayContrast = overlayContrastForFrame;
+        overlayOpacity = overlayOpacityForFrame;
+        overlayX = overlayXForFrame;
+        overlayY = overlayYForFrame;
+        
+        renderOverlayToCanvas(ctx, videoWidth, videoHeight);
+        
+        // Restore original overlay values
+        overlaySize = origOverlaySize;
+        overlayBrightness = origOverlayBrightness;
+        overlayContrast = origOverlayContrast;
+        overlayOpacity = origOverlayOpacity;
+        overlayX = origOverlayX;
+        overlayY = origOverlayY;
+    }
+
+    return ctx.getImageData(0, 0, videoWidth, videoHeight);
+}
+
+/**
+ * Generate video from current image using chunked processing to avoid memory issues
+ * Processes frames in 1/8th chunks and encodes each chunk before moving to the next
  */
 async function generateVideo() {
     if (!currentImageData || !ffmpegReady) {
@@ -3175,7 +3649,7 @@ async function generateVideo() {
     try {
         // If video input, use generateVideoFromVideo instead
         if (currentInputType === 'video' && currentVideoPath) {
-            await generateVideoFromVideo(currentVideoPath, (percent) => {
+            await generateVideoFromVideoChunked(currentVideoPath, (percent) => {
                 updateProgress(percent);
             });
             return;
@@ -3219,15 +3693,6 @@ async function generateVideo() {
         
         const baseASCIIFrame = convertFrameToASCII(currentImageData, currentCharWidth, charHeight);
         
-        const videoCanvas = document.createElement('canvas');
-        videoCanvas.width = videoWidth;
-        videoCanvas.height = videoHeight;
-
-        // Create frame array with mode-specific logic
-        const frames = [];
-        let cachedASCIIFrame = null;
-        let lastASCIIFrameIndex = -1;
-        
         // Pre-analyze audio if sound reactive is enabled
         let audioLevelPerFrame = [];
         if (soundReactiveEnabled && audioBuffer) {
@@ -3250,185 +3715,13 @@ async function generateVideo() {
                 audioLevelPerFrame[i] = Math.min(1, average * 2); // Normalize
             }
         }
-        
-        for (let i = 0; i < totalFrames; i++) {
-            // Get current audio level for this frame
-            let currentAudioLevelForFrame = 0;
-            if (soundReactiveEnabled && audioLevelPerFrame[i] !== undefined) {
-                currentAudioLevelForFrame = audioLevelPerFrame[i];
-            }
-            
-            // Calculate sound reactive effects for this frame
-            let asciiResolutionForFrame = currentCharWidth;
-            let asciiBrightnessForFrame = brightness;
-            let asciiContrastForFrame = contrast;
-            let asciiOpacityForFrame = opacity;
-            let asciiHueForFrame = hue;
-            let asciiSaturationForFrame = saturation;
-            let overlaySizeForFrame = overlaySize;
-            let overlayBrightnessForFrame = overlayBrightness;
-            let overlayContrastForFrame = overlayContrast;
-            let overlayOpacityForFrame = overlayOpacity;
-            let overlayXForFrame = overlayX;
-            let overlayYForFrame = overlayY;
-            
-            if (soundReactiveEnabled && asciiResolutionChange !== 0) {
-                asciiResolutionForFrame = Math.max(10, currentCharWidth + (asciiResolutionChange * currentAudioLevelForFrame * volumeSensitivity));
-            }
-            if (soundReactiveEnabled && asciiBrightnessChange !== 0) {
-                asciiBrightnessForFrame = brightness + (asciiBrightnessChange * currentAudioLevelForFrame * volumeSensitivity);
-            }
-            if (soundReactiveEnabled && asciiContrastChange !== 0) {
-                asciiContrastForFrame = Math.max(0, contrast + (asciiContrastChange * currentAudioLevelForFrame * volumeSensitivity));
-            }
-            if (soundReactiveEnabled && asciiOpacityChange !== 0) {
-                asciiOpacityForFrame = Math.max(0, Math.min(100, opacity + (asciiOpacityChange * currentAudioLevelForFrame * volumeSensitivity)));
-            }
-            if (soundReactiveEnabled && asciiHueShift !== 0) {
-                asciiHueForFrame = hue + (asciiHueShift * currentAudioLevelForFrame * volumeSensitivity);
-            }
-            if (soundReactiveEnabled && asciiSaturationChange !== 0) {
-                asciiSaturationForFrame = Math.max(0, saturation + (asciiSaturationChange * currentAudioLevelForFrame * volumeSensitivity));
-            }
-            if (soundReactiveEnabled && overlaySizeChange !== 0) {
-                overlaySizeForFrame = Math.max(50, overlaySize + (overlaySizeChange * currentAudioLevelForFrame * volumeSensitivity));
-            }
-            if (soundReactiveEnabled && overlayBrightnessChange !== 0) {
-                overlayBrightnessForFrame = overlayBrightness + (overlayBrightnessChange * currentAudioLevelForFrame * volumeSensitivity);
-            }
-            if (soundReactiveEnabled && overlayContrastChange !== 0) {
-                overlayContrastForFrame = Math.max(0, overlayContrast + (overlayContrastChange * currentAudioLevelForFrame * volumeSensitivity));
-            }
-            if (soundReactiveEnabled && overlayOpacityChange !== 0) {
-                overlayOpacityForFrame = Math.max(0, Math.min(100, overlayOpacity + (overlayOpacityChange * currentAudioLevelForFrame * volumeSensitivity)));
-            }
-            if (soundReactiveEnabled && overlayXChange !== 0) {
-                overlayXForFrame = overlayX + (overlayXChange * currentAudioLevelForFrame * volumeSensitivity / videoWidth * 100);
-            }
-            if (soundReactiveEnabled && overlayYChange !== 0) {
-                overlayYForFrame = overlayY + (overlayYChange * currentAudioLevelForFrame * volumeSensitivity / videoHeight * 100);
-            }
-            
-            // Get ASCII frame for this mode
-            let asciiFrame = null;
-            let renderCharHeight = charHeight;
-            
-            if (currentMode === 'original') {
-                // Match preview timing: regenerate at currentFPS rate
-                const framesPerASCIIUpdate = Math.max(1, Math.round(framerate / currentFPS));
-                if (i % framesPerASCIIUpdate === 0) {
-                    asciiFrame = convertFrameToASCII(currentImageData, asciiResolutionForFrame, charHeight);
-                    cachedASCIIFrame = asciiFrame;
-                } else {
-                    asciiFrame = cachedASCIIFrame;
-                }
-            } else if (currentMode === 'scroll') {
-                // Match preview timing: one character shift per currentFPS frame
-                const effectiveFrame = Math.floor(i * currentFPS / framerate);
-                asciiFrame = shiftASCIIFrame(baseASCIIFrame, effectiveFrame % currentCharWidth);
-            } else if (currentMode === 'zoom') {
-                // Match preview timing: 30 frames at currentFPS = cycle duration in seconds
-                const cycleDurationSeconds = 30 / currentFPS;
-                const timeInVideo = i / framerate; // Current time in seconds
-                const progress = (timeInVideo % cycleDurationSeconds) / cycleDurationSeconds;
-                const zoomCharWidth = getZoomCharWidth(progress);
-                renderCharHeight = Math.round(zoomCharWidth / currentAspectRatio);
-                asciiFrame = convertFrameToASCII(currentImageData, zoomCharWidth, renderCharHeight);
-            } else if (currentMode === 'flag') {
-                // Flag mode: static ASCII with waving animation (loops continuously)
-                if (i === 0) {
-                    asciiFrame = convertFrameToASCII(currentImageData, asciiResolutionForFrame, charHeight);
-                    cachedASCIIFrame = asciiFrame;
-                } else {
-                    asciiFrame = cachedASCIIFrame;
-                }
-            } else if (currentMode === 'dither') {
-                // Dither mode: static ASCII with ordered dithering pattern
-                if (i === 0) {
-                    asciiFrame = convertFrameToASCIIDither(currentImageData, asciiResolutionForFrame, charHeight);
-                    cachedASCIIFrame = asciiFrame;
-                } else {
-                    asciiFrame = cachedASCIIFrame;
-                }
-            } else if (currentMode === 'glitch') {
-                // Glitch mode: match preview timing by using effective frame count at currentFPS
-                const effectiveFrame = Math.floor(i * currentFPS / framerate);
-                asciiFrame = convertFrameToASCIIGlitch(currentImageData, asciiResolutionForFrame, charHeight, effectiveFrame);
-            }
 
-            // Render frame to temporary canvas
-            const tempVideoCanvas = document.createElement('canvas');
-            tempVideoCanvas.width = videoWidth;
-            tempVideoCanvas.height = videoHeight;
-            
-            const ctx = tempVideoCanvas.getContext('2d');
-            ctx.fillStyle = '#000000';
-            ctx.fillRect(0, 0, videoWidth, videoHeight);
-            
-            // Store original effect values
-            const origBrightness = brightness;
-            const origContrast = contrast;
-            const origOpacity = opacity;
-            const origHue = hue;
-            const origSaturation = saturation;
-            
-            // Apply sound reactive ASCII effects
-            brightness = asciiBrightnessForFrame;
-            contrast = asciiContrastForFrame;
-            opacity = asciiOpacityForFrame;
-            hue = asciiHueForFrame;
-            saturation = asciiSaturationForFrame;
-            
-            // Use flag rendering for flag mode, normal rendering for others
-            if (currentMode === 'flag') {
-                // Match preview timing: 3 second cycle
-                const cycleDurationSeconds = 3;
-                const timeInVideo = i / framerate; // Current time in seconds
-                const flagProgress = (timeInVideo % cycleDurationSeconds) / cycleDurationSeconds;
-                renderASCIIFrameWithFlag(asciiFrame, tempVideoCanvas, fontSize, renderCharHeight, flagProgress);
-            } else {
-                renderASCIIFrame(asciiFrame, tempVideoCanvas, fontSize, renderCharHeight);
-            }
-            
-            // Restore original effects
-            brightness = origBrightness;
-            contrast = origContrast;
-            opacity = origOpacity;
-            hue = origHue;
-            saturation = origSaturation;
-            
-            // Render overlay image on top if enabled
-            if (overlayEnabled && overlayImageData) {
-                // Store original overlay values
-                const origOverlaySize = overlaySize;
-                const origOverlayBrightness = overlayBrightness;
-                const origOverlayContrast = overlayContrast;
-                const origOverlayOpacity = overlayOpacity;
-                const origOverlayX = overlayX;
-                const origOverlayY = overlayY;
-                
-                // Apply sound reactive overlay effects
-                overlaySize = overlaySizeForFrame;
-                overlayBrightness = overlayBrightnessForFrame;
-                overlayContrast = overlayContrastForFrame;
-                overlayOpacity = overlayOpacityForFrame;
-                overlayX = overlayXForFrame;
-                overlayY = overlayYForFrame;
-                
-                renderOverlayToCanvas(ctx, videoWidth, videoHeight);
-                
-                // Restore original overlay values
-                overlaySize = origOverlaySize;
-                overlayBrightness = origOverlayBrightness;
-                overlayContrast = origOverlayContrast;
-                overlayOpacity = origOverlayOpacity;
-                overlayX = origOverlayX;
-                overlayY = origOverlayY;
-            }
-
-            frames.push(ctx.getImageData(0, 0, videoWidth, videoHeight));
-            updateProgress(Math.round((i / totalFrames) * 30)); // 0-30% for frame generation
-        }
+        // Prepare shared params for frame generation
+        const cachedASCIIFrameRef = { value: null };
+        const frameParams = {
+            totalFrames, framerate, videoWidth, videoHeight, fontSize, charHeight,
+            baseASCIIFrame, audioLevelPerFrame, cachedASCIIFrameRef
+        };
 
         // Prepare audio for export if needed
         let audioData = null;
@@ -3437,13 +3730,65 @@ async function generateVideo() {
             audioData = new Uint8Array(audioArrayBuffer);
         }
 
-        // Encode to MP4
-        const videoBlob = await encodeToMP4(frames, duration, (percent) => {
-            updateProgress(30 + Math.round(percent * 0.7)); // 30-100% for encoding
-        }, audioData);
+        const helpers = getFFmpegHelpers();
 
-        // Save video for download
-        window.generatedVideoBlob = videoBlob;
+        // For small frame counts (≤60), use non-chunked approach
+        if (totalFrames <= 60) {
+            const frames = [];
+            for (let i = 0; i < totalFrames; i++) {
+                frames.push(generateSingleFrame(i, frameParams));
+                updateProgress(Math.round((i / totalFrames) * 30));
+            }
+
+            // Encode to MP4
+            const videoBlob = await encodeToMP4(frames, duration, (percent) => {
+                updateProgress(30 + Math.round(percent * 0.7));
+            }, audioData);
+
+            window.generatedVideoBlob = videoBlob;
+        } else {
+            // CHUNKED PROCESSING: Process in 1/8th chunks to avoid memory issues
+            const numChunks = 8;
+            const chunkSize = Math.ceil(totalFrames / numChunks);
+            const chunkNames = [];
+            
+            console.log(`Chunked generation: ${totalFrames} frames in ${numChunks} chunks of ~${chunkSize} frames`);
+
+            for (let chunkIndex = 0; chunkIndex < numChunks; chunkIndex++) {
+                const chunkStart = chunkIndex * chunkSize;
+                const chunkEnd = Math.min(chunkStart + chunkSize, totalFrames);
+                const chunkFrameCount = chunkEnd - chunkStart;
+                
+                if (chunkFrameCount <= 0) break;
+
+                console.log(`Processing chunk ${chunkIndex + 1}/${numChunks}: frames ${chunkStart}-${chunkEnd - 1}`);
+
+                // Generate frames for this chunk
+                const chunkFrames = [];
+                for (let i = chunkStart; i < chunkEnd; i++) {
+                    chunkFrames.push(generateSingleFrame(i, frameParams));
+                    
+                    // Update progress: 0-70% for frame generation across all chunks
+                    const overallProgress = (i / totalFrames) * 70;
+                    updateProgress(Math.round(overallProgress));
+                }
+
+                // Encode this chunk immediately
+                const chunkName = await encodeChunkToMP4(chunkFrames, chunkIndex, videoWidth, videoHeight, helpers);
+                chunkNames.push(chunkName);
+                
+                // Clear chunk frames from memory
+                chunkFrames.length = 0;
+                
+                // Allow garbage collection between chunks
+                await new Promise(resolve => setTimeout(resolve, 10));
+            }
+
+            // Concatenate all chunks
+            updateProgress(75);
+            const videoBlob = await concatenateChunks(chunkNames, helpers, audioData);
+            window.generatedVideoBlob = videoBlob;
+        }
 
         updateProgress(100);
         showStatus('Video generated successfully! Click "Download Video" to save.', 'success');
@@ -3467,27 +3812,10 @@ async function generateVideo() {
     }
 }
 
-/**
- * Encode frames to MP4 video using FFmpeg
- */
-async function encodeToMP4(frames, duration, onProgress, audioData = null) {
-    if (!ffmpegReady || !ffmpeg) {
-        throw new Error('FFmpeg not ready');
-    }
-
-    const framerate = 30;
-    const totalFrames = frames.length;
-    
-    // Get actual frame dimensions from the first frame
-    const frameWidth = frames[0].width;
-    const frameHeight = frames[0].height;
-    
-    console.log(`Encoding video at ${frameWidth}x${frameHeight}`);
-    
-    // Determine which API to use
+// FFmpeg file helper functions (shared across encoding functions)
+function getFFmpegHelpers() {
     const useOldAPI = ffmpeg._oldAPI;
     
-    // Helper functions for file operations
     const writeFile = (name, data) => {
         if (useOldAPI) {
             ffmpeg.FS('writeFile', name, data);
@@ -3525,37 +3853,226 @@ async function encodeToMP4(frames, duration, onProgress, audioData = null) {
             // Ignore cleanup errors
         }
     };
+    
+    return { writeFile, readFile, unlinkFile };
+}
+
+/**
+ * Write a single frame to FFmpeg filesystem as PPM
+ */
+function writeFrameToPPM(frame, frameIndex, helpers) {
+    const { writeFile } = helpers;
+    const frameData = frame.data;
+    const frameWidth = frame.width;
+    const frameHeight = frame.height;
+    const fileName = `frame_${String(frameIndex).padStart(6, '0')}.ppm`;
+
+    // Create PPM format (simple uncompressed image format)
+    const ppmHeader = `P6\n${frameWidth} ${frameHeight}\n255\n`;
+    const headerBytes = new TextEncoder().encode(ppmHeader);
+
+    // Extract RGB from RGBA
+    const rgbData = new Uint8Array(frameWidth * frameHeight * 3);
+    for (let j = 0; j < frameData.length; j += 4) {
+        const rgbIndex = (j / 4) * 3;
+        rgbData[rgbIndex] = frameData[j];         // R
+        rgbData[rgbIndex + 1] = frameData[j + 1]; // G
+        rgbData[rgbIndex + 2] = frameData[j + 2]; // B
+    }
+
+    // Combine header and RGB data
+    const fileData = new Uint8Array(headerBytes.length + rgbData.length);
+    fileData.set(headerBytes);
+    fileData.set(rgbData, headerBytes.length);
+
+    writeFile(fileName, fileData);
+    return fileName;
+}
+
+/**
+ * Encode a chunk of frames to a partial MP4 video
+ */
+async function encodeChunkToMP4(frames, chunkIndex, frameWidth, frameHeight, helpers) {
+    const { writeFile, readFile, unlinkFile } = helpers;
+    const framerate = 30;
+    const totalFrames = frames.length;
+    
+    // Write frames to FFmpeg as PPM files
+    for (let i = 0; i < totalFrames; i++) {
+        writeFrameToPPM(frames[i], i, helpers);
+    }
+
+    const outputName = `chunk_${chunkIndex}.mp4`;
+
+    // Run FFmpeg to create video chunk
+    await ffmpeg.run(
+        '-framerate', String(framerate),
+        '-pattern_type', 'glob',
+        '-i', 'frame_*.ppm',
+        '-c:v', 'libx264',
+        '-pix_fmt', 'yuv420p',
+        '-preset', 'fast',
+        '-crf', '23',
+        outputName
+    );
+
+    // Read the chunk video
+    const chunkData = readFile(outputName);
+
+    // Clean up frame files
+    for (let i = 0; i < totalFrames; i++) {
+        const fileName = `frame_${String(i).padStart(6, '0')}.ppm`;
+        unlinkFile(fileName);
+    }
+    
+    // Don't delete the chunk file yet - we need it for concatenation
+    return outputName;
+}
+
+/**
+ * Concatenate multiple video chunks into final output
+ */
+async function concatenateChunks(chunkNames, helpers, audioData = null) {
+    const { writeFile, readFile, unlinkFile } = helpers;
+    
+    // Create concat file list
+    let concatList = '';
+    for (const chunkName of chunkNames) {
+        concatList += `file '${chunkName}'\n`;
+    }
+    writeFile('concat_list.txt', new TextEncoder().encode(concatList));
+
+    // Write audio file if provided
+    let hasAudio = false;
+    if (audioData) {
+        try {
+            writeFile('audio.mp3', audioData);
+            hasAudio = true;
+            console.log('Audio file written to FFmpeg filesystem');
+        } catch (error) {
+            console.error('Failed to write audio file:', error);
+        }
+    }
+
+    // Concatenate all chunks
+    if (hasAudio) {
+        await ffmpeg.run(
+            '-f', 'concat',
+            '-safe', '0',
+            '-i', 'concat_list.txt',
+            '-i', 'audio.mp3',
+            '-c:v', 'copy',
+            '-c:a', 'aac',
+            '-b:a', '192k',
+            '-shortest',
+            'output.mp4'
+        );
+    } else {
+        await ffmpeg.run(
+            '-f', 'concat',
+            '-safe', '0',
+            '-i', 'concat_list.txt',
+            '-c:v', 'copy',
+            'output.mp4'
+        );
+    }
+
+    // Read final output
+    const videoData = readFile('output.mp4');
+    const videoBlob = new Blob([videoData.buffer || videoData], { type: 'video/mp4' });
+
+    // Clean up
+    unlinkFile('concat_list.txt');
+    unlinkFile('output.mp4');
+    if (hasAudio) {
+        unlinkFile('audio.mp3');
+    }
+    for (const chunkName of chunkNames) {
+        unlinkFile(chunkName);
+    }
+
+    return videoBlob;
+}
+
+/**
+ * Encode frames to MP4 video using FFmpeg with chunked processing to avoid memory issues
+ * Processes frames in chunks (default: 1/8th of total) and stitches them together
+ */
+async function encodeToMP4(frames, duration, onProgress, audioData = null) {
+    if (!ffmpegReady || !ffmpeg) {
+        throw new Error('FFmpeg not ready');
+    }
+
+    const totalFrames = frames.length;
+    
+    // Get actual frame dimensions from the first frame
+    const frameWidth = frames[0].width;
+    const frameHeight = frames[0].height;
+    
+    console.log(`Encoding video at ${frameWidth}x${frameHeight}`);
+    
+    const helpers = getFFmpegHelpers();
+
+    // For small frame counts, use direct encoding without chunking
+    if (totalFrames <= 60) {
+        return await encodeToMP4Direct(frames, duration, onProgress, audioData, helpers);
+    }
+
+    // Calculate chunk size (1/8th of total frames, minimum 30 frames per chunk)
+    const numChunks = 8;
+    const chunkSize = Math.max(30, Math.ceil(totalFrames / numChunks));
+    const chunkNames = [];
+    
+    console.log(`Chunked encoding: ${totalFrames} frames in chunks of ${chunkSize}`);
+
+    // Process frames in chunks
+    let processedFrames = 0;
+    for (let chunkStart = 0; chunkStart < totalFrames; chunkStart += chunkSize) {
+        const chunkEnd = Math.min(chunkStart + chunkSize, totalFrames);
+        const chunkFrames = frames.slice(chunkStart, chunkEnd);
+        const chunkIndex = Math.floor(chunkStart / chunkSize);
+        
+        console.log(`Processing chunk ${chunkIndex + 1}: frames ${chunkStart}-${chunkEnd - 1}`);
+        
+        // Encode this chunk
+        const chunkName = await encodeChunkToMP4(chunkFrames, chunkIndex, frameWidth, frameHeight, helpers);
+        chunkNames.push(chunkName);
+        
+        processedFrames = chunkEnd;
+        if (onProgress) {
+            // Reserve last 10% for concatenation
+            onProgress((processedFrames / totalFrames) * 90);
+        }
+        
+        // Clear chunk frames from memory to help GC
+        chunkFrames.length = 0;
+    }
+
+    // Clear original frames array to free memory before concatenation
+    frames.length = 0;
+
+    // Concatenate all chunks with audio
+    if (onProgress) onProgress(92);
+    const videoBlob = await concatenateChunks(chunkNames, helpers, audioData);
+    if (onProgress) onProgress(100);
+
+    return videoBlob;
+}
+
+/**
+ * Direct encoding for small frame counts (no chunking)
+ */
+async function encodeToMP4Direct(frames, duration, onProgress, audioData, helpers) {
+    const { writeFile, readFile, unlinkFile } = helpers;
+    const framerate = 30;
+    const totalFrames = frames.length;
+    
+    const frameWidth = frames[0].width;
+    const frameHeight = frames[0].height;
 
     // Write frames to FFmpeg as raw video
     for (let i = 0; i < totalFrames; i++) {
-        const frameData = frames[i].data;
-        const fileName = `frame_${String(i).padStart(6, '0')}.ppm`;
-
-        // Create PPM format (simple uncompressed image format)
-        const ppmHeader = `P6\n${frameWidth} ${frameHeight}\n255\n`;
-        const headerBytes = new TextEncoder().encode(ppmHeader);
-
-        // Extract RGB from RGBA
-        const rgbData = new Uint8Array(frameWidth * frameHeight * 3);
-        for (let j = 0; j < frameData.length; j += 4) {
-            const rgbIndex = (j / 4) * 3;
-            rgbData[rgbIndex] = frameData[j];         // R
-            rgbData[rgbIndex + 1] = frameData[j + 1]; // G
-            rgbData[rgbIndex + 2] = frameData[j + 2]; // B
-        }
-
-        // Combine header and RGB data
-        const fileData = new Uint8Array(headerBytes.length + rgbData.length);
-        fileData.set(headerBytes);
-        fileData.set(rgbData, headerBytes.length);
-
-        // Write file
-        try {
-            writeFile(fileName, fileData);
-        } catch (error) {
-            console.error('WriteFile error details:', error);
-            throw new Error(`Failed to write file: ${error.message}`);
-        }
+        writeFrameToPPM(frames[i], i, helpers);
 
         if (onProgress) {
             onProgress((i / totalFrames) * 100);
@@ -3577,7 +4094,6 @@ async function encodeToMP4(frames, duration, onProgress, audioData = null) {
     // Run FFmpeg to create video
     try {
         if (hasAudio) {
-            // Include audio in the output
             await ffmpeg.run(
                 '-framerate', String(framerate),
                 '-pattern_type', 'glob',
