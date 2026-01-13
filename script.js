@@ -3149,6 +3149,15 @@ async function generateVideo() {
         // Stop animation loop
         if (animationLoop) clearInterval(animationLoop);
 
+        // Check if resolution is too high (avoid memory issues)
+        if (exportWidth > 2160) {
+            showStatus('Resolution limited to 4K (2160px) to prevent out-of-memory errors. Please select a lower resolution.', 'warning');
+            progressSection.style.display = 'none';
+            actionSection.style.display = 'block';
+            document.getElementById('generateButton').disabled = false;
+            return;
+        }
+
         // Generate ASCII frame once
         const fontSize = getEffectiveFontSize(exportWidth, currentCharWidth);
 
