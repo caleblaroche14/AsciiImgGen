@@ -890,6 +890,7 @@
                 <div class="settings-group">
                     <label for="exportResolutionSelect">Export Resolution:</label>
                     <select id="exportResolutionSelect" class="select-field">
+                        <option value="source">Source (Match Input)</option>
                         <option value="480">480p (480px)</option>
                         <option value="720">720p (720px)</option>
                         <option value="810">810p (810px)</option>
@@ -898,7 +899,11 @@
                         <option value="1440">1440p (1440px)</option>
                         <option value="1920">1920p (1920px)</option>
                         <option value="2160">4K (2160px)</option>
+                        <option value="2880">5K (2880px)</option>
+                        <option value="3840">UHD (3840px)</option>
+                        <option value="4320">8K (4320px)</option>
                     </select>
+                    <small id="sourceResolutionHint" style="color: #888; display: none;">Will export at source dimensions</small>
                 </div>
                 <div class="settings-group">
                     <label>

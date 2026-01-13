@@ -154,6 +154,7 @@ const CHAR_REGION_SIZE = OUTPUT_WIDTH / CHAR_WIDTH; // ~5.4px per character
 
 // Export resolution (can be changed by user)
 let exportWidth = 1080;
+let useSourceResolution = false; // When true, use the original image/video dimensions
 
 // ============================================================================
 // INITIALIZATION
@@ -945,9 +946,27 @@ function setupEventListeners() {
 
     // Export Resolution dropdown
     const exportResolutionSelect = document.getElementById('exportResolutionSelect');
+    const sourceResolutionHint = document.getElementById('sourceResolutionHint');
     if (exportResolutionSelect) {
         exportResolutionSelect.addEventListener('change', (e) => {
-            exportWidth = parseInt(e.target.value);
+            const value = e.target.value;
+            if (value === 'source') {
+                useSourceResolution = true;
+                // Update hint with actual source dimensions
+                if (sourceResolutionHint && currentImageData) {
+                    sourceResolutionHint.textContent = `Will export at ${currentImageData.width}x${currentImageData.height}px`;
+                    sourceResolutionHint.style.display = 'block';
+                } else if (sourceResolutionHint) {
+                    sourceResolutionHint.textContent = 'Will export at source dimensions';
+                    sourceResolutionHint.style.display = 'block';
+                }
+            } else {
+                useSourceResolution = false;
+                exportWidth = parseInt(value);
+                if (sourceResolutionHint) {
+                    sourceResolutionHint.style.display = 'none';
+                }
+            }
         });
     }
 
@@ -2145,6 +2164,9 @@ function loadImage(img) {
     // Get image data
     currentImageData = ctx.getImageData(0, 0, img.width, img.height);
 
+    // Update source resolution hint if visible
+    updateSourceResolutionHint();
+
     // Generate and display ASCII preview
     generatePreview();
 
@@ -2153,6 +2175,21 @@ function loadImage(img) {
     document.getElementById('canvasPlaceholder').style.display = 'none';
 
     showStatus('Image loaded successfully. Click "Generate Video" to create ASCII art video.', 'success');
+}
+
+/**
+ * Update the source resolution hint with current image/video dimensions
+ */
+function updateSourceResolutionHint() {
+    const sourceResolutionHint = document.getElementById('sourceResolutionHint');
+    const exportResolutionSelect = document.getElementById('exportResolutionSelect');
+    
+    if (sourceResolutionHint && exportResolutionSelect && exportResolutionSelect.value === 'source') {
+        if (currentImageData) {
+            sourceResolutionHint.textContent = `Will export at ${currentImageData.width}x${currentImageData.height}px`;
+            sourceResolutionHint.style.display = 'block';
+        }
+    }
 }
 
 /**
@@ -2917,8 +2954,15 @@ async function generateVideoFromVideo(videoPath, onProgress) {
 
         currentAspectRatio = videoWidth / videoHeight;
         
-        const fontSize = getEffectiveFontSize(exportWidth, currentCharWidth);
-        const outputHeight = Math.round(exportWidth / currentAspectRatio);
+        // Determine actual export width (handle source resolution mode)
+        let actualExportWidth = exportWidth;
+        if (useSourceResolution) {
+            actualExportWidth = videoWidth;
+            console.log(`Using source video resolution: ${actualExportWidth}px`);
+        }
+        
+        const fontSize = getEffectiveFontSize(actualExportWidth, currentCharWidth);
+        const outputHeight = Math.round(actualExportWidth / currentAspectRatio);
         const charHeight = Math.round(outputHeight / fontSize / 1.2);
         
         // Get desired output duration from UI (default 5 seconds)
@@ -3047,12 +3091,12 @@ async function generateVideoFromVideo(videoPath, onProgress) {
                     
                     // Render ASCII frame
                     const tempVideoCanvas = document.createElement('canvas');
-                    tempVideoCanvas.width = exportWidth;
+                    tempVideoCanvas.width = actualExportWidth;
                     tempVideoCanvas.height = outputHeight;
                     
                     const tempCtx = tempVideoCanvas.getContext('2d');
                     tempCtx.fillStyle = '#000000';
-                    tempCtx.fillRect(0, 0, exportWidth, outputHeight);
+                    tempCtx.fillRect(0, 0, actualExportWidth, outputHeight);
                     
                     // Store original effect values
                     const origBrightness = brightness;
@@ -3106,7 +3150,7 @@ async function generateVideoFromVideo(videoPath, onProgress) {
                         overlayContrast = overlayContrastForFrame;
                         overlayOpacity = overlayOpacityForFrame;
                         
-                        renderOverlayToCanvas(tempCtx, exportWidth, outputHeight);
+                        renderOverlayToCanvas(tempCtx, actualExportWidth, outputHeight);
                         
                         // Restore original overlay values
                         overlaySize = origOverlaySize;
@@ -3115,7 +3159,7 @@ async function generateVideoFromVideo(videoPath, onProgress) {
                         overlayOpacity = origOverlayOpacity;
                     }
                     
-                    frames.push(tempCtx.getImageData(0, 0, exportWidth, outputHeight));
+                    frames.push(tempCtx.getImageData(0, 0, actualExportWidth, outputHeight));
                     onProgress(Math.round((frameIndex / totalFrames) * 30));
                     resolve();
                 };
@@ -3181,8 +3225,15 @@ async function generateVideoFromVideoChunked(videoPath, onProgress) {
 
         currentAspectRatio = videoWidth / videoHeight;
         
-        const fontSize = getEffectiveFontSize(exportWidth, currentCharWidth);
-        const outputHeight = Math.round(exportWidth / currentAspectRatio);
+        // Determine actual export width (handle source resolution mode)
+        let actualExportWidth = exportWidth;
+        if (useSourceResolution) {
+            actualExportWidth = videoWidth;
+            console.log(`Using source video resolution: ${actualExportWidth}px`);
+        }
+        
+        const fontSize = getEffectiveFontSize(actualExportWidth, currentCharWidth);
+        const outputHeight = Math.round(actualExportWidth / currentAspectRatio);
         const charHeight = Math.round(outputHeight / fontSize / 1.2);
         
         // Get desired output duration from UI (default 5 seconds)
@@ -3214,18 +3265,18 @@ async function generateVideoFromVideoChunked(videoPath, onProgress) {
 
         const helpers = getFFmpegHelpers();
         
-        // Calculate chunk parameters
-        const numChunks = 8;
-        const chunkSize = Math.ceil(totalFrames / numChunks);
+        // Calculate optimal chunk parameters based on resolution
+        const { chunkSize, numChunks } = calculateOptimalChunkSize(totalFrames, actualExportWidth, outputHeight);
         const chunkNames = [];
         
         console.log(`Chunked video processing: ${totalFrames} frames in ${numChunks} chunks of ~${chunkSize} frames`);
 
         // Process each chunk
-        for (let chunkIndex = 0; chunkIndex < numChunks; chunkIndex++) {
-            const chunkStart = chunkIndex * chunkSize;
+        let processedChunks = 0;
+        for (let chunkStart = 0; chunkStart < totalFrames; chunkStart += chunkSize) {
             const chunkEnd = Math.min(chunkStart + chunkSize, totalFrames);
             const chunkFrameCount = chunkEnd - chunkStart;
+            const chunkIndex = processedChunks;
             
             if (chunkFrameCount <= 0) break;
 
@@ -3327,12 +3378,12 @@ async function generateVideoFromVideoChunked(videoPath, onProgress) {
                         
                         // Render ASCII frame
                         const tempVideoCanvas = document.createElement('canvas');
-                        tempVideoCanvas.width = exportWidth;
+                        tempVideoCanvas.width = actualExportWidth;
                         tempVideoCanvas.height = outputHeight;
                         
                         const tempCtx = tempVideoCanvas.getContext('2d');
                         tempCtx.fillStyle = '#000000';
-                        tempCtx.fillRect(0, 0, exportWidth, outputHeight);
+                        tempCtx.fillRect(0, 0, actualExportWidth, outputHeight);
                         
                         // Store original effect values
                         const origBrightness = brightness;
@@ -3381,7 +3432,7 @@ async function generateVideoFromVideoChunked(videoPath, onProgress) {
                             overlayContrast = overlayContrastForFrame;
                             overlayOpacity = overlayOpacityForFrame;
                             
-                            renderOverlayToCanvas(tempCtx, exportWidth, outputHeight);
+                            renderOverlayToCanvas(tempCtx, actualExportWidth, outputHeight);
                             
                             overlaySize = origOverlaySize;
                             overlayBrightness = origOverlayBrightness;
@@ -3389,7 +3440,7 @@ async function generateVideoFromVideoChunked(videoPath, onProgress) {
                             overlayOpacity = origOverlayOpacity;
                         }
                         
-                        chunkFrames.push(tempCtx.getImageData(0, 0, exportWidth, outputHeight));
+                        chunkFrames.push(tempCtx.getImageData(0, 0, actualExportWidth, outputHeight));
                         
                         // Update progress: 0-70% for frame generation
                         const overallProgress = (frameIndex / totalFrames) * 70;
@@ -3402,14 +3453,16 @@ async function generateVideoFromVideoChunked(videoPath, onProgress) {
             }
 
             // Encode this chunk immediately
-            const chunkName = await encodeChunkToMP4(chunkFrames, chunkIndex, exportWidth, outputHeight, helpers);
+            const chunkName = await encodeChunkToMP4(chunkFrames, chunkIndex, actualExportWidth, outputHeight, helpers);
             chunkNames.push(chunkName);
             
             // Clear chunk frames from memory
             chunkFrames.length = 0;
             
+            processedChunks++;
+            
             // Allow garbage collection between chunks
-            await new Promise(resolve => setTimeout(resolve, 10));
+            await new Promise(resolve => setTimeout(resolve, 50));
         }
 
         // Concatenate all chunks
@@ -3436,6 +3489,46 @@ async function generateVideoFromVideoChunked(videoPath, onProgress) {
             generatePreview();
         }
     }
+}
+
+/**
+ * Calculate optimal chunk size based on resolution and available memory
+ * Uses very small chunks to minimize memory footprint
+ * 
+ * Memory per frame = width * height * 4 bytes (RGBA)
+ * Target: Keep each chunk under ~50MB of raw frame data
+ * 
+ * @param {number} totalFrames - Total number of frames to process
+ * @param {number} width - Frame width in pixels
+ * @param {number} height - Frame height in pixels
+ * @returns {object} - { chunkSize, numChunks }
+ */
+function calculateOptimalChunkSize(totalFrames, width, height) {
+    // Memory per frame in bytes (RGBA = 4 bytes per pixel)
+    const bytesPerFrame = width * height * 4;
+    
+    // Target max memory per chunk: 50MB (very conservative)
+    // For 4K (3840x2160): ~33MB per frame, so 1-2 frames per chunk
+    // For 1080p (1920x1080): ~8MB per frame, so 6 frames per chunk
+    // For 720p (1280x720): ~3.7MB per frame, so 13 frames per chunk
+    const targetChunkMemory = 50 * 1024 * 1024; // 50MB
+    
+    // Calculate frames per chunk based on memory
+    let framesPerChunk = Math.floor(targetChunkMemory / bytesPerFrame);
+    
+    // Minimum 1 frame per chunk, maximum 15 frames per chunk for responsiveness
+    framesPerChunk = Math.max(1, Math.min(15, framesPerChunk));
+    
+    // Calculate number of chunks
+    const numChunks = Math.ceil(totalFrames / framesPerChunk);
+    
+    console.log(`Chunk calculation: ${width}x${height} @ ${(bytesPerFrame / 1024 / 1024).toFixed(2)}MB/frame`);
+    console.log(`  -> ${framesPerChunk} frames/chunk, ${numChunks} total chunks`);
+    
+    return {
+        chunkSize: framesPerChunk,
+        numChunks: numChunks
+    };
 }
 
 /**
@@ -3672,20 +3765,23 @@ async function generateVideo() {
         // Stop animation loop
         if (animationLoop) clearInterval(animationLoop);
 
-        // Check if resolution is too high (avoid memory issues)
-        if (exportWidth > 2160) {
-            showStatus('Resolution limited to 4K (2160px) to prevent out-of-memory errors. Please select a lower resolution.', 'warning');
-            progressSection.style.display = 'none';
-            actionSection.style.display = 'block';
-            document.getElementById('generateButton').disabled = false;
-            return;
+        // Determine actual export width (handle source resolution mode)
+        let actualExportWidth = exportWidth;
+        if (useSourceResolution && currentImageData) {
+            actualExportWidth = currentImageData.width;
+            console.log(`Using source resolution: ${actualExportWidth}px`);
+        }
+        
+        // Warn for very high resolutions but allow with chunked processing
+        if (actualExportWidth > 4320) {
+            showStatus('Very high resolution selected. Export may take a while.', 'warning');
         }
 
         // Generate ASCII frame once
-        const fontSize = getEffectiveFontSize(exportWidth, currentCharWidth);
+        const fontSize = getEffectiveFontSize(actualExportWidth, currentCharWidth);
 
         // Calculate video dimensions based on aspect ratio
-        const videoWidth = exportWidth;
+        const videoWidth = actualExportWidth;
         const videoHeight = Math.round(videoWidth / currentAspectRatio);
         
         // Calculate character grid height based on rendered height
@@ -3747,17 +3843,17 @@ async function generateVideo() {
 
             window.generatedVideoBlob = videoBlob;
         } else {
-            // CHUNKED PROCESSING: Process in 1/8th chunks to avoid memory issues
-            const numChunks = 8;
-            const chunkSize = Math.ceil(totalFrames / numChunks);
+            // CHUNKED PROCESSING: Use adaptive chunk size based on resolution
+            const { chunkSize, numChunks } = calculateOptimalChunkSize(totalFrames, videoWidth, videoHeight);
             const chunkNames = [];
             
             console.log(`Chunked generation: ${totalFrames} frames in ${numChunks} chunks of ~${chunkSize} frames`);
 
-            for (let chunkIndex = 0; chunkIndex < numChunks; chunkIndex++) {
-                const chunkStart = chunkIndex * chunkSize;
+            let processedChunks = 0;
+            for (let chunkStart = 0; chunkStart < totalFrames; chunkStart += chunkSize) {
                 const chunkEnd = Math.min(chunkStart + chunkSize, totalFrames);
                 const chunkFrameCount = chunkEnd - chunkStart;
+                const chunkIndex = processedChunks;
                 
                 if (chunkFrameCount <= 0) break;
 
@@ -3780,8 +3876,10 @@ async function generateVideo() {
                 // Clear chunk frames from memory
                 chunkFrames.length = 0;
                 
+                processedChunks++;
+                
                 // Allow garbage collection between chunks
-                await new Promise(resolve => setTimeout(resolve, 10));
+                await new Promise(resolve => setTimeout(resolve, 50));
             }
 
             // Concatenate all chunks
@@ -4013,24 +4111,23 @@ async function encodeToMP4(frames, duration, onProgress, audioData = null) {
     
     const helpers = getFFmpegHelpers();
 
-    // For small frame counts, use direct encoding without chunking
-    if (totalFrames <= 60) {
+    // For very small frame counts, use direct encoding without chunking
+    if (totalFrames <= 30) {
         return await encodeToMP4Direct(frames, duration, onProgress, audioData, helpers);
     }
 
-    // Calculate chunk size (1/8th of total frames, minimum 30 frames per chunk)
-    const numChunks = 8;
-    const chunkSize = Math.max(30, Math.ceil(totalFrames / numChunks));
+    // Calculate optimal chunk size based on resolution
+    const { chunkSize, numChunks } = calculateOptimalChunkSize(totalFrames, frameWidth, frameHeight);
     const chunkNames = [];
     
-    console.log(`Chunked encoding: ${totalFrames} frames in chunks of ${chunkSize}`);
+    console.log(`Chunked encoding: ${totalFrames} frames in ~${numChunks} chunks of ${chunkSize}`);
 
     // Process frames in chunks
     let processedFrames = 0;
+    let chunkIndex = 0;
     for (let chunkStart = 0; chunkStart < totalFrames; chunkStart += chunkSize) {
         const chunkEnd = Math.min(chunkStart + chunkSize, totalFrames);
         const chunkFrames = frames.slice(chunkStart, chunkEnd);
-        const chunkIndex = Math.floor(chunkStart / chunkSize);
         
         console.log(`Processing chunk ${chunkIndex + 1}: frames ${chunkStart}-${chunkEnd - 1}`);
         
@@ -4046,6 +4143,10 @@ async function encodeToMP4(frames, duration, onProgress, audioData = null) {
         
         // Clear chunk frames from memory to help GC
         chunkFrames.length = 0;
+        chunkIndex++;
+        
+        // Allow garbage collection between chunks
+        await new Promise(resolve => setTimeout(resolve, 50));
     }
 
     // Clear original frames array to free memory before concatenation
