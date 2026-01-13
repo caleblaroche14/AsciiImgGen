@@ -2283,7 +2283,13 @@ function generateVideoPreview(videoElement) {
     outputCanvas.height = canvasHeight;
 
     // Stop any existing animation loop
-    if (animationLoop) clearInterval(animationLoop);
+    if (animationLoop) {
+        if (typeof animationLoop === 'number') {
+            cancelAnimationFrame(animationLoop);
+        } else {
+            clearInterval(animationLoop);
+        }
+    }
 
     // Create temporary canvas for reading video frames
     const tempCanvas = document.createElement('canvas');
@@ -2388,13 +2394,30 @@ function generatePreview() {
     let baseASCIIFrame = null;
     let lastScrollCharWidth = currentCharWidth;
 
-    // Start animation loop with fps based on mode
-    if (animationLoop) clearInterval(animationLoop);
-    let frameCount = 0;
-    const frameInterval = 1000 / currentFPS;
+    // Stop any existing animation loop
+    if (animationLoop) {
+        if (typeof animationLoop === 'number') {
+            cancelAnimationFrame(animationLoop);
+        } else {
+            clearInterval(animationLoop);
+        }
+    }
     
-    animationLoop = setInterval(() => {
-        const ctx = outputCanvas.getContext('2d', { willReadFrequently: true });
+    // Use requestAnimationFrame with time-based frame counting for accurate timing
+    let frameCount = 0;
+    let lastFrameTime = performance.now();
+    const frameInterval = 1000 / currentFPS; // ms per frame
+    
+    const animate = (currentTime) => {
+        // Calculate elapsed time since last frame
+        const elapsed = currentTime - lastFrameTime;
+        
+        // Only render a new frame if enough time has passed
+        if (elapsed >= frameInterval) {
+            // Adjust for any time drift
+            lastFrameTime = currentTime - (elapsed % frameInterval);
+            
+            const ctx = outputCanvas.getContext('2d', { willReadFrequently: true });
 
         // Update sound reactive effects if enabled
         updateSoundReactiveEffects();
@@ -2441,7 +2464,9 @@ function generatePreview() {
             const flagProgress = (frameCount % cycleDurationFrames) / cycleDurationFrames;
             renderASCIIFrameWithFlag(asciiFrame, outputCanvas, fontSize, renderCharHeight, flagProgress);
             frameCount++;
-            return; // Skip normal render, handled by renderASCIIFrameWithFlag
+            // Continue animation loop and skip normal render
+            animationLoop = requestAnimationFrame(animate);
+            return;
         } else if (currentMode === 'dither') {
             // Dither mode: static ASCII with ordered dithering pattern
             asciiFrame = convertFrameToASCIIDither(currentImageData, currentCharWidthForThisFrame, charHeight);
@@ -2511,8 +2536,15 @@ function generatePreview() {
             overlaySaturation = origOverlaySaturation;
         }
         
-        frameCount++;
-    }, frameInterval);
+            frameCount++;
+        }
+        
+        // Continue animation loop
+        animationLoop = requestAnimationFrame(animate);
+    };
+    
+    // Start the animation
+    animationLoop = requestAnimationFrame(animate);
 }
 
 // ============================================================================
