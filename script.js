@@ -1070,6 +1070,79 @@ function updateOverlayStyles() {
 }
 
 /**
+ * Render overlay image to canvas for video generation
+ */
+function renderOverlayToCanvas(ctx, canvasWidth, canvasHeight) {
+    if (!overlayImageData || !overlayEnabled) return;
+    
+    // Calculate position based on percentage (same as updateOverlayPosition)
+    const x = (canvasWidth * overlayX) / 100 - (overlaySize / 2);
+    const y = (canvasHeight * overlayY) / 100 - (overlaySize / 2);
+    
+    // Save context state
+    ctx.save();
+    
+    // Apply rotation around center
+    if (overlayRotation !== 0) {
+        const centerX = x + overlaySize / 2;
+        const centerY = y + overlaySize / 2;
+        ctx.translate(centerX, centerY);
+        ctx.rotate((overlayRotation * Math.PI) / 180);
+        ctx.translate(-centerX, -centerY);
+    }
+    
+    // Apply opacity
+    ctx.globalAlpha = overlayOpacity / 100;
+    
+    // Apply shadow effect
+    if (overlayShadow > 0) {
+        const shadowSize = Math.ceil(overlayShadow);
+        ctx.shadowColor = `rgba(0, 0, 0, ${0.3 + (overlayShadow * 0.03)})`;
+        ctx.shadowBlur = shadowSize * 2;
+        ctx.shadowOffsetX = shadowSize;
+        ctx.shadowOffsetY = shadowSize;
+    }
+    
+    // Apply glow effect
+    if (overlayGlow > 0) {
+        ctx.shadowColor = `rgba(0, 212, 255, ${0.3 + (overlayGlow * 0.05)})`;
+        ctx.shadowBlur = Math.ceil(overlayGlow * 2);
+        ctx.shadowOffsetX = 0;
+        ctx.shadowOffsetY = 0;
+    }
+    
+    // Check if we need to apply filters
+    const needsFilters = overlayBlur > 0 || overlayBrightness !== 0 || overlayContrast !== 100 || overlaySaturation !== 100;
+    
+    if (needsFilters) {
+        // Create a temporary canvas for filtered overlay
+        const tempCanvas = document.createElement('canvas');
+        tempCanvas.width = overlaySize;
+        tempCanvas.height = overlaySize;
+        const tempCtx = tempCanvas.getContext('2d');
+        
+        // Build filter string
+        let filters = [];
+        if (overlayBlur > 0) filters.push(`blur(${overlayBlur}px)`);
+        if (overlayBrightness !== 0) filters.push(`brightness(${100 + overlayBrightness}%)`);
+        if (overlayContrast !== 100) filters.push(`contrast(${overlayContrast}%)`);
+        if (overlaySaturation !== 100) filters.push(`saturate(${overlaySaturation}%)`);
+        
+        tempCtx.filter = filters.join(' ');
+        tempCtx.drawImage(overlayImageData, 0, 0, overlaySize, overlaySize);
+        
+        // Draw filtered image to main canvas
+        ctx.drawImage(tempCanvas, x, y);
+    } else {
+        // Draw the image directly without filters
+        ctx.drawImage(overlayImageData, x, y, overlaySize, overlaySize);
+    }
+    
+    // Restore context state
+    ctx.restore();
+}
+
+/**
  * Start dragging overlay image
  */
 function startDraggingOverlay(e) {
@@ -2003,6 +2076,11 @@ async function generateVideoFromVideo(videoPath, onProgress) {
                         renderASCIIFrame(asciiFrame, tempVideoCanvas, fontSize, charHeight);
                     }
                     
+                    // Render overlay image on top if enabled
+                    if (overlayEnabled && overlayImageData) {
+                        renderOverlayToCanvas(tempCtx, OUTPUT_WIDTH, outputHeight);
+                    }
+                    
                     frames.push(tempCtx.getImageData(0, 0, OUTPUT_WIDTH, outputHeight));
                     onProgress(Math.round((frameIndex / totalFrames) * 30));
                     resolve();
@@ -2158,6 +2236,11 @@ async function generateVideo() {
             } else {
                 renderASCIIFrame(asciiFrame, tempVideoCanvas, fontSize, renderCharHeight);
             }
+            
+            // Render overlay image on top if enabled
+            if (overlayEnabled && overlayImageData) {
+                renderOverlayToCanvas(ctx, videoWidth, videoHeight);
+            }
 
             frames.push(ctx.getImageData(0, 0, videoWidth, videoHeight));
             updateProgress(Math.round((i / totalFrames) * 30)); // 0-30% for frame generation
@@ -2203,6 +2286,12 @@ async function encodeToMP4(frames, duration, onProgress) {
 
     const framerate = 30;
     const totalFrames = frames.length;
+    
+    // Get actual frame dimensions from the first frame
+    const frameWidth = frames[0].width;
+    const frameHeight = frames[0].height;
+    
+    console.log(`Encoding video at ${frameWidth}x${frameHeight}`);
     
     // Determine which API to use
     const useOldAPI = ffmpeg._oldAPI;
@@ -2252,11 +2341,11 @@ async function encodeToMP4(frames, duration, onProgress) {
         const fileName = `frame_${String(i).padStart(6, '0')}.ppm`;
 
         // Create PPM format (simple uncompressed image format)
-        const ppmHeader = `P6\n${OUTPUT_WIDTH} ${OUTPUT_HEIGHT}\n255\n`;
+        const ppmHeader = `P6\n${frameWidth} ${frameHeight}\n255\n`;
         const headerBytes = new TextEncoder().encode(ppmHeader);
 
         // Extract RGB from RGBA
-        const rgbData = new Uint8Array(OUTPUT_WIDTH * OUTPUT_HEIGHT * 3);
+        const rgbData = new Uint8Array(frameWidth * frameHeight * 3);
         for (let j = 0; j < frameData.length; j += 4) {
             const rgbIndex = (j / 4) * 3;
             rgbData[rgbIndex] = frameData[j];         // R
