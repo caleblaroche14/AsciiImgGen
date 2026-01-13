@@ -2039,15 +2039,19 @@ async function generateVideoFromVideo(videoPath, onProgress) {
                     } else if (currentMode === 'scroll') {
                         asciiFrame = convertFrameToASCII(frameData, currentCharWidth, charHeight);
                     } else if (currentMode === 'zoom') {
-                        const cycleLength = Math.floor(totalFrames / 3);
-                        const progress = (frameIndex % cycleLength) / cycleLength;
+                        // Match preview timing: 30 frames at currentFPS = cycle duration in seconds
+                        const cycleDurationSeconds = 30 / currentFPS;
+                        const timeInVideo = frameIndex / videoFPS;
+                        const progress = (timeInVideo % cycleDurationSeconds) / cycleDurationSeconds;
                         const zoomCharWidth = getZoomCharWidth(progress);
                         const zoomCharHeight = Math.round(zoomCharWidth / currentAspectRatio);
                         asciiFrame = convertFrameToASCII(frameData, zoomCharWidth, zoomCharHeight);
                     } else if (currentMode === 'dither') {
                         asciiFrame = convertFrameToASCIIDither(frameData, currentCharWidth, charHeight);
                     } else if (currentMode === 'glitch') {
-                        asciiFrame = convertFrameToASCIIGlitch(frameData, currentCharWidth, charHeight, frameIndex);
+                        // Match preview timing by using effective frame count at currentFPS
+                        const effectiveFrame = Math.floor(frameIndex * currentFPS / videoFPS);
+                        asciiFrame = convertFrameToASCIIGlitch(frameData, currentCharWidth, charHeight, effectiveFrame);
                     } else {
                         asciiFrame = convertFrameToASCII(frameData, currentCharWidth, charHeight);
                     }
@@ -2062,14 +2066,22 @@ async function generateVideoFromVideo(videoPath, onProgress) {
                     tempCtx.fillRect(0, 0, OUTPUT_WIDTH, outputHeight);
                     
                     if (currentMode === 'flag') {
-                        const flagProgress = (frameIndex % 30) / 30;
+                        // Match preview timing: 30 frames at currentFPS = cycle duration in seconds
+                        const cycleDurationSeconds = 30 / currentFPS;
+                        const timeInVideo = frameIndex / videoFPS;
+                        const flagProgress = (timeInVideo % cycleDurationSeconds) / cycleDurationSeconds;
                         renderASCIIFrameWithFlag(asciiFrame, tempVideoCanvas, fontSize, charHeight, flagProgress);
                     } else if (currentMode === 'scroll') {
-                        const shiftedFrame = shiftASCIIFrame(asciiFrame, frameIndex % currentCharWidth);
+                        // Match preview timing: one character shift per currentFPS frame
+                        const effectiveFrame = Math.floor(frameIndex * currentFPS / videoFPS);
+                        const shiftedFrame = shiftASCIIFrame(asciiFrame, effectiveFrame % currentCharWidth);
                         renderASCIIFrame(shiftedFrame, tempVideoCanvas, fontSize, charHeight);
                     } else if (currentMode === 'zoom') {
-                        const cycleLength = Math.floor(totalFrames / 3);
-                        const zoomCharWidth = getZoomCharWidth((frameIndex % cycleLength) / cycleLength);
+                        // Match preview timing: 30 frames at currentFPS = cycle duration in seconds
+                        const cycleDurationSeconds = 30 / currentFPS;
+                        const timeInVideo = frameIndex / videoFPS;
+                        const progress = (timeInVideo % cycleDurationSeconds) / cycleDurationSeconds;
+                        const zoomCharWidth = getZoomCharWidth(progress);
                         const zoomCharHeight = Math.round(zoomCharWidth / currentAspectRatio);
                         renderASCIIFrame(asciiFrame, tempVideoCanvas, fontSize, zoomCharHeight);
                     } else {
@@ -2183,19 +2195,23 @@ async function generateVideo() {
             let renderCharHeight = charHeight;
             
             if (currentMode === 'original') {
-                // Regenerate ASCII frame every 3 frames (10fps @ 30fps video)
-                if (i % 3 === 0) {
+                // Match preview timing: regenerate at currentFPS rate
+                const framesPerASCIIUpdate = Math.max(1, Math.round(framerate / currentFPS));
+                if (i % framesPerASCIIUpdate === 0) {
                     asciiFrame = convertFrameToASCII(currentImageData, currentCharWidth, charHeight);
                     cachedASCIIFrame = asciiFrame;
                 } else {
                     asciiFrame = cachedASCIIFrame;
                 }
             } else if (currentMode === 'scroll') {
-                asciiFrame = shiftASCIIFrame(baseASCIIFrame, i % currentCharWidth);
+                // Match preview timing: one character shift per currentFPS frame
+                const effectiveFrame = Math.floor(i * currentFPS / framerate);
+                asciiFrame = shiftASCIIFrame(baseASCIIFrame, effectiveFrame % currentCharWidth);
             } else if (currentMode === 'zoom') {
-                // Cycle through zoom multiple times over video duration
-                const cycleLength = Math.floor(totalFrames / 3); // 3 zoom cycles per video
-                const progress = (i % cycleLength) / cycleLength;
+                // Match preview timing: 30 frames at currentFPS = cycle duration in seconds
+                const cycleDurationSeconds = 30 / currentFPS;
+                const timeInVideo = i / framerate; // Current time in seconds
+                const progress = (timeInVideo % cycleDurationSeconds) / cycleDurationSeconds;
                 const zoomCharWidth = getZoomCharWidth(progress);
                 renderCharHeight = Math.round(zoomCharWidth / currentAspectRatio);
                 asciiFrame = convertFrameToASCII(currentImageData, zoomCharWidth, renderCharHeight);
@@ -2216,8 +2232,9 @@ async function generateVideo() {
                     asciiFrame = cachedASCIIFrame;
                 }
             } else if (currentMode === 'glitch') {
-                // Glitch mode: random displacement animation changes every frame
-                asciiFrame = convertFrameToASCIIGlitch(currentImageData, currentCharWidth, charHeight, i);
+                // Glitch mode: match preview timing by using effective frame count at currentFPS
+                const effectiveFrame = Math.floor(i * currentFPS / framerate);
+                asciiFrame = convertFrameToASCIIGlitch(currentImageData, currentCharWidth, charHeight, effectiveFrame);
             }
 
             // Render frame to temporary canvas
@@ -2231,7 +2248,10 @@ async function generateVideo() {
             
             // Use flag rendering for flag mode, normal rendering for others
             if (currentMode === 'flag') {
-                const flagProgress = (i % 30) / 30; // 30-frame cycle (loops continuously)
+                // Match preview timing: 30 frames at currentFPS = cycle duration in seconds
+                const cycleDurationSeconds = 30 / currentFPS;
+                const timeInVideo = i / framerate; // Current time in seconds
+                const flagProgress = (timeInVideo % cycleDurationSeconds) / cycleDurationSeconds;
                 renderASCIIFrameWithFlag(asciiFrame, tempVideoCanvas, fontSize, renderCharHeight, flagProgress);
             } else {
                 renderASCIIFrame(asciiFrame, tempVideoCanvas, fontSize, renderCharHeight);
