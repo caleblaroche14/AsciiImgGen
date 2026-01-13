@@ -143,6 +143,9 @@ async function initializeFFmpeg() {
  * Setup event listeners for UI elements
  */
 function setupEventListeners() {
+    // Setup overlay panel toggles
+    setupOverlayPanels();
+
     const imageInput = document.getElementById('imageInput');
     const videoInput = document.getElementById('videoInput');
     const generateButton = document.getElementById('generateButton');
@@ -194,28 +197,7 @@ function setupEventListeners() {
     // Mode selection
     modeSelect.addEventListener('change', (e) => {
         currentMode = e.target.value;
-        
-        // Show/hide zoom sliders
-        document.getElementById('zoomSettings').style.display = 
-            currentMode === 'zoom' ? 'flex' : 'none';
-        document.getElementById('zoomMaxSettings').style.display = 
-            currentMode === 'zoom' ? 'flex' : 'none';
-        
-        // Show/hide flag sliders
-        document.getElementById('flagDistanceSettings').style.display = 
-            currentMode === 'flag' ? 'flex' : 'none';
-        document.getElementById('flagSpeedSettings').style.display = 
-            currentMode === 'flag' ? 'flex' : 'none';
-        
-        // Show/hide dither slider
-        document.getElementById('ditherSensitivitySettings').style.display = 
-            currentMode === 'dither' ? 'flex' : 'none';
-        document.getElementById('ditherContrastSettings').style.display = 
-            currentMode === 'dither' ? 'flex' : 'none';
-        
-        // Show/hide glitch slider
-        document.getElementById('glitchIntensitySettings').style.display = 
-            currentMode === 'glitch' ? 'flex' : 'none';
+        updateModeSettings(currentMode);
         
         if (currentImageData) {
             generatePreview();
@@ -584,6 +566,161 @@ function setupEventListeners() {
 }
 
 /**
+ * Setup overlay panel toggle functionality
+ */
+function setupOverlayPanels() {
+    const sidebarToggle = document.getElementById('sidebarToggle');
+    const sidebarMenu = document.getElementById('sidebarMenu');
+    const menuItems = document.querySelectorAll('.sidebar-menu-item');
+    let panelsOpen = false;
+    let menuOpen = false;
+    
+    // Sidebar toggle functionality
+    if (sidebarToggle) {
+        sidebarToggle.addEventListener('click', (e) => {
+            e.stopPropagation();
+            
+            // Toggle menu visibility on mobile
+            menuOpen = !menuOpen;
+            if (sidebarMenu) {
+                sidebarMenu.classList.toggle('open');
+            }
+            
+            // Also toggle panels
+            panelsOpen = !panelsOpen;
+            sidebarToggle.classList.toggle('open');
+            
+            if (!panelsOpen) {
+                // Close all panels
+                const allPanels = document.querySelectorAll('.overlay-panel');
+                allPanels.forEach(panel => {
+                    panel.classList.add('hidden');
+                });
+                if (sidebarMenu) {
+                    sidebarMenu.classList.remove('open');
+                }
+            }
+        });
+    }
+    
+    // Sidebar menu item functionality
+    menuItems.forEach(item => {
+        item.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const panelId = item.dataset.overlay;
+            const panel = document.getElementById(panelId);
+            
+            if (panel) {
+                panel.classList.toggle('hidden');
+                
+                // Update sidebar state based on whether any panels are open
+                const allPanels = document.querySelectorAll('.overlay-panel');
+                const anyOpen = Array.from(allPanels).some(p => !p.classList.contains('hidden'));
+                panelsOpen = anyOpen;
+                
+                if (sidebarToggle) {
+                    if (anyOpen) {
+                        sidebarToggle.classList.add('open');
+                    } else {
+                        sidebarToggle.classList.remove('open');
+                        if (sidebarMenu) {
+                            sidebarMenu.classList.remove('open');
+                        }
+                        menuOpen = false;
+                    }
+                }
+            }
+        });
+    });
+
+    // Close panels when clicking the X button (on the h3 element)
+    const panels = document.querySelectorAll('.overlay-panel');
+    panels.forEach(panel => {
+        const h3 = panel.querySelector('h3');
+        if (h3) {
+            // Create a close button element
+            const closeBtn = document.createElement('span');
+            closeBtn.innerHTML = '✕';
+            closeBtn.style.cursor = 'pointer';
+            closeBtn.style.padding = '5px 10px';
+            closeBtn.style.fontSize = '1.2rem';
+            closeBtn.style.transition = 'all 0.2s ease';
+            closeBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                panel.classList.add('hidden');
+                
+                // Update sidebar state
+                const allPanels = document.querySelectorAll('.overlay-panel');
+                const anyOpen = Array.from(allPanels).some(p => !p.classList.contains('hidden'));
+                panelsOpen = anyOpen;
+                
+                if (sidebarToggle) {
+                    if (anyOpen) {
+                        sidebarToggle.classList.add('open');
+                    } else {
+                        sidebarToggle.classList.remove('open');
+                        if (sidebarMenu) {
+                            sidebarMenu.classList.remove('open');
+                        }
+                        menuOpen = false;
+                    }
+                }
+            });
+            closeBtn.addEventListener('mouseenter', () => {
+                closeBtn.style.transform = 'scale(1.2)';
+                closeBtn.style.color = '#ff6b6b';
+            });
+            closeBtn.addEventListener('mouseleave', () => {
+                closeBtn.style.transform = 'scale(1)';
+                closeBtn.style.color = '#00d4ff';
+            });
+            h3.appendChild(closeBtn);
+        }
+    });
+
+    // Hide panels by default
+    panels.forEach(panel => {
+        panel.classList.add('hidden');
+    });
+    
+    // Close menu when clicking outside on mobile
+    document.addEventListener('click', () => {
+        if (menuOpen && sidebarMenu && !sidebarToggle.contains(event.target)) {
+            sidebarMenu.classList.remove('open');
+            menuOpen = false;
+        }
+    });
+}
+
+/**
+ * Update visibility of mode-specific settings
+ */
+function updateModeSettings(mode) {
+    // Helper function to set display with !important
+    const setDisplay = (elementId, shouldShow) => {
+        const el = document.getElementById(elementId);
+        if (el) {
+            el.style.setProperty('display', shouldShow ? 'flex' : 'none', 'important');
+        }
+    };
+    
+    // Show/hide zoom sliders
+    setDisplay('zoomSettings', mode === 'zoom');
+    setDisplay('zoomMaxSettings', mode === 'zoom');
+    
+    // Show/hide flag sliders
+    setDisplay('flagDistanceSettings', mode === 'flag');
+    setDisplay('flagSpeedSettings', mode === 'flag');
+    
+    // Show/hide dither slider
+    setDisplay('ditherSensitivitySettings', mode === 'dither');
+    setDisplay('ditherContrastSettings', mode === 'dither');
+    
+    // Show/hide glitch slider
+    setDisplay('glitchIntensitySettings', mode === 'glitch');
+}
+
+/**
  * Load default image on page load
  */
 async function loadDefaultImage() {
@@ -599,6 +736,8 @@ async function loadDefaultImage() {
                 showStatus('Default image loaded successfully.', 'success');
                 // Load default overlay
                 loadDefaultOverlay();
+                // Initialize mode settings visibility
+                updateModeSettings(currentMode);
             };
             img.onerror = () => {
                 showStatus('Failed to load default image', 'error');
@@ -2049,7 +2188,7 @@ async function generateVideo() {
  * Encode frames to MP4 video using FFmpeg
  */
 async function encodeToMP4(frames, duration, onProgress) {
-    if (!ffmpegReady) {
+    if (!ffmpegReady || !ffmpeg) {
         throw new Error('FFmpeg not ready');
     }
 
@@ -2079,7 +2218,15 @@ async function encodeToMP4(frames, duration, onProgress) {
         fileData.set(headerBytes);
         fileData.set(rgbData, headerBytes.length);
 
-        await ffmpeg.writeFile(fileName, fileData);
+        // Use writeFile with proper API
+        if (typeof ffmpeg.writeFile === 'function') {
+            await ffmpeg.writeFile(fileName, fileData);
+        } else if (ffmpeg.FS && typeof ffmpeg.FS.writeFile === 'function') {
+            // Fallback for different API
+            ffmpeg.FS.writeFile(fileName, fileData);
+        } else {
+            throw new Error('FFmpeg writeFile method not available');
+        }
 
         if (onProgress) {
             onProgress((i / totalFrames) * 100);
@@ -2087,30 +2234,51 @@ async function encodeToMP4(frames, duration, onProgress) {
     }
 
     // Run FFmpeg to create video
-    await ffmpeg.exec([
-        '-framerate', String(framerate),
-        '-pattern_type', 'glob',
-        '-i', 'frame_*.ppm',
-        '-c:v', 'libx264',
-        '-pix_fmt', 'yuv420p',
-        '-preset', 'medium',
-        '-crf', '23',
-        'output.mp4'
-    ]);
+    if (typeof ffmpeg.exec === 'function') {
+        await ffmpeg.exec([
+            '-framerate', String(framerate),
+            '-pattern_type', 'glob',
+            '-i', 'frame_*.ppm',
+            '-c:v', 'libx264',
+            '-pix_fmt', 'yuv420p',
+            '-preset', 'medium',
+            '-crf', '23',
+            'output.mp4'
+        ]);
+    } else {
+        throw new Error('FFmpeg exec method not available');
+    }
 
     // Read output video file
-    const videoData = await ffmpeg.readFile('output.mp4');
+    let videoData;
+    if (typeof ffmpeg.readFile === 'function') {
+        videoData = await ffmpeg.readFile('output.mp4');
+    } else if (ffmpeg.FS && typeof ffmpeg.FS.readFile === 'function') {
+        // Fallback for different API
+        videoData = ffmpeg.FS.readFile('output.mp4');
+    } else {
+        throw new Error('FFmpeg readFile method not available');
+    }
+
     const videoBlob = new Blob([videoData.buffer], { type: 'video/mp4' });
 
     // Clean up FFmpeg filesystem
-    await ffmpeg.deleteFile('output.mp4');
-    for (let i = 0; i < totalFrames; i++) {
-        const fileName = `frame_${String(i).padStart(6, '0')}.ppm`;
+    const deleteFile = async (name) => {
         try {
-            await ffmpeg.deleteFile(fileName);
+            if (typeof ffmpeg.deleteFile === 'function') {
+                await ffmpeg.deleteFile(name);
+            } else if (ffmpeg.FS && typeof ffmpeg.FS.unlink === 'function') {
+                ffmpeg.FS.unlink(name);
+            }
         } catch (e) {
             // Ignore cleanup errors
         }
+    };
+
+    await deleteFile('output.mp4');
+    for (let i = 0; i < totalFrames; i++) {
+        const fileName = `frame_${String(i).padStart(6, '0')}.ppm`;
+        await deleteFile(fileName);
     }
 
     return videoBlob;

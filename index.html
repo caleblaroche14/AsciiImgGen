@@ -7,6 +7,16 @@
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
+    <!-- Floating Sidebar Toggle -->
+    <div class="sidebar-toggle" id="sidebarToggle">
+        <span>⚙️</span>
+        <div class="sidebar-menu" id="sidebarMenu">
+            <button class="sidebar-menu-item" data-overlay="modeSettings">⚙️ Mode & Settings</button>
+            <button class="sidebar-menu-item" data-overlay="effectsSettings">✨ Effects</button>
+            <button class="sidebar-menu-item" data-overlay="imageOverlaySettings">🖼️ Image Overlay</button>
+        </div>
+    </div>
+
     <div class="container">
         <header>
             <h1>AsciiImgGen</h1>
@@ -50,8 +60,9 @@
                 </div>
             </section>
 
-            <!-- Settings Section -->
-            <section class="settings-section">
+            <!-- Settings Section - Collapsible Overlay -->
+            <section class="settings-section overlay-panel" id="modeSettings">
+                <h3 style="margin-top: 0;">Mode & Settings</h3>
                 <div class="settings-group">
                     <label for="modeSelect">Mode:</label>
                     <select id="modeSelect" class="input-field">
@@ -205,8 +216,8 @@
                 </div>
             </section>
 
-            <!-- Effects Section -->
-            <section class="settings-section">
+            <!-- Effects Section - Collapsible Overlay -->
+            <section class="settings-section overlay-panel" id="effectsSettings">
                 <h3 style="margin-top: 0;">Effects</h3>
                 <div class="settings-group">
                     <label for="vignetteSlider">Vignette: <span id="vignetteValue">0</span></label>
@@ -368,8 +379,8 @@
                 </div>
             </section>
 
-            <!-- Image Overlay Section -->
-            <section class="settings-section">
+            <!-- Image Overlay Section - Collapsible Overlay -->
+            <section class="settings-section overlay-panel" id="imageOverlaySettings">
                 <h3 style="margin-top: 0;">Image Overlay</h3>
                 <div class="overlay-controls">
                     <div class="settings-group">
