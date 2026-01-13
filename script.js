@@ -2218,14 +2218,24 @@ async function encodeToMP4(frames, duration, onProgress) {
         fileData.set(headerBytes);
         fileData.set(rgbData, headerBytes.length);
 
-        // Use writeFile with proper API
-        if (typeof ffmpeg.writeFile === 'function') {
-            await ffmpeg.writeFile(fileName, fileData);
-        } else if (ffmpeg.FS && typeof ffmpeg.FS.writeFile === 'function') {
-            // Fallback for different API
-            ffmpeg.FS.writeFile(fileName, fileData);
-        } else {
-            throw new Error('FFmpeg writeFile method not available');
+        // Use writeFile with proper API - try multiple approaches
+        try {
+            if (typeof ffmpeg.writeFile === 'function') {
+                await ffmpeg.writeFile(fileName, fileData);
+            } else if (ffmpeg.FS && typeof ffmpeg.FS.writeFile === 'function') {
+                // Fallback for different API
+                ffmpeg.FS.writeFile(fileName, fileData);
+            } else if (ffmpeg.FS && typeof ffmpeg.FS.writeFile === 'undefined' && ffmpeg.FS.open) {
+                // Try using FS.open for older APIs
+                const stream = ffmpeg.FS.open(fileName, 'w');
+                ffmpeg.FS.write(stream, fileData, 0, fileData.length);
+                ffmpeg.FS.close(stream);
+            } else {
+                throw new Error(`FFmpeg API not recognized. Available methods: ${Object.keys(ffmpeg || {}).join(', ')}`);
+            }
+        } catch (error) {
+            console.error('WriteFile error details:', error);
+            throw new Error(`Failed to write file: ${error.message}`);
         }
 
         if (onProgress) {
@@ -2251,16 +2261,28 @@ async function encodeToMP4(frames, duration, onProgress) {
 
     // Read output video file
     let videoData;
-    if (typeof ffmpeg.readFile === 'function') {
-        videoData = await ffmpeg.readFile('output.mp4');
-    } else if (ffmpeg.FS && typeof ffmpeg.FS.readFile === 'function') {
-        // Fallback for different API
-        videoData = ffmpeg.FS.readFile('output.mp4');
-    } else {
-        throw new Error('FFmpeg readFile method not available');
+    try {
+        if (typeof ffmpeg.readFile === 'function') {
+            videoData = await ffmpeg.readFile('output.mp4');
+        } else if (ffmpeg.FS && typeof ffmpeg.FS.readFile === 'function') {
+            // Fallback for different API
+            videoData = ffmpeg.FS.readFile('output.mp4');
+        } else if (ffmpeg.FS && ffmpeg.FS.readFile === undefined && ffmpeg.FS.open) {
+            // Try using FS.open for older APIs
+            const stream = ffmpeg.FS.open('output.mp4', 'r');
+            const stat = ffmpeg.FS.stat('output.mp4');
+            videoData = new Uint8Array(stat.size);
+            ffmpeg.FS.read(stream, videoData, 0, stat.size);
+            ffmpeg.FS.close(stream);
+        } else {
+            throw new Error(`FFmpeg readFile not available. Available FS methods: ${Object.keys(ffmpeg.FS || {}).join(', ')}`);
+        }
+    } catch (error) {
+        console.error('ReadFile error details:', error);
+        throw new Error(`Failed to read video file: ${error.message}`);
     }
 
-    const videoBlob = new Blob([videoData.buffer], { type: 'video/mp4' });
+    const videoBlob = new Blob([videoData.buffer || videoData], { type: 'video/mp4' });
 
     // Clean up FFmpeg filesystem
     const deleteFile = async (name) => {
