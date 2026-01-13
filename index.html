@@ -14,6 +14,7 @@
             <button class="sidebar-menu-item" data-overlay="modeSettings">⚙️ Mode & Settings</button>
             <button class="sidebar-menu-item" data-overlay="effectsSettings">✨ Effects</button>
             <button class="sidebar-menu-item" data-overlay="imageOverlaySettings">🖼️ Image Overlay</button>
+            <button class="sidebar-menu-item" data-overlay="soundReactiveSettings">🎵 Sound Reactive</button>
         </div>
     </div>
 
@@ -537,6 +538,306 @@
                             class="input-slider"
                         >
                     </div>
+                </div>
+            </section>
+
+            <!-- Sound Reactive Section - Collapsible Overlay -->
+            <section class="settings-section overlay-panel" id="soundReactiveSettings">
+                <h3 style="margin-top: 0;">Sound Reactive Effects</h3>
+                
+                <div class="audio-controls">
+                    <div class="settings-group">
+                        <label for="audioInput">Upload Audio:</label>
+                        <input 
+                            type="file" 
+                            id="audioInput" 
+                            accept="audio/*" 
+                            class="file-input"
+                        >
+                        <label for="audioInput" class="file-input-button">Choose Audio</label>
+                    </div>
+                    <div class="settings-group">
+                        <label>
+                            <input type="checkbox" id="soundReactiveToggle" style="width: 20px; height: 20px; cursor: pointer;">
+                            Enable Sound Reactive Effects
+                        </label>
+                    </div>
+                </div>
+
+                <!-- Audio Player Controls -->
+                <div class="audio-player-controls" id="audioPlayerControls" style="display: none;">
+                    <div style="display: flex; gap: 10px; align-items: center; margin-bottom: 12px; flex-wrap: wrap;">
+                        <button id="playAudioButton" class="audio-btn">▶ Play</button>
+                        <button id="pauseAudioButton" class="audio-btn" style="display: none;">⏸ Pause</button>
+                        <button id="stopAudioButton" class="audio-btn">■ Stop</button>
+                        <span id="audioTimeDisplay" style="font-size: 0.9rem; color: #00d4ff; min-width: 100px;">0:00 / 0:00</span>
+                    </div>
+                    <div style="width: 100%; height: 4px; background: rgba(0, 212, 255, 0.2); border-radius: 2px; cursor: pointer; position: relative;" id="audioProgressBar">
+                        <div style="height: 100%; background: #00d4ff; border-radius: 2px; width: 0%;" id="audioProgressFill"></div>
+                    </div>
+                </div>
+
+                <!-- Master Control -->
+                <h4 style="color: #00d4ff; margin-top: 15px; margin-bottom: 10px;">Master Control</h4>
+                <div class="settings-group">
+                    <label for="volumeSensitivitySlider">Volume Sensitivity: <span id="volumeSensitivityValue">1.0</span></label>
+                    <input 
+                        type="range" 
+                        id="volumeSensitivitySlider" 
+                        min="0.1" 
+                        max="5" 
+                        step="0.1"
+                        value="1.0" 
+                        class="input-slider"
+                    >
+                </div>
+
+                <!-- Frequency Response -->
+                <h4 style="color: #00d4ff; margin-top: 15px; margin-bottom: 10px;">Frequency Response</h4>
+                <div class="settings-group">
+                    <label for="bassResponseSlider">Bass Response: <span id="bassResponseValue">1.0</span></label>
+                    <input 
+                        type="range" 
+                        id="bassResponseSlider" 
+                        min="0" 
+                        max="3" 
+                        step="0.1"
+                        value="1.0" 
+                        class="input-slider"
+                    >
+                    <small style="color: #888;">React to low frequencies (kick, bass)</small>
+                </div>
+                <div class="settings-group">
+                    <label for="midResponseSlider">Mid Response: <span id="midResponseValue">1.0</span></label>
+                    <input 
+                        type="range" 
+                        id="midResponseSlider" 
+                        min="0" 
+                        max="3" 
+                        step="0.1"
+                        value="1.0" 
+                        class="input-slider"
+                    >
+                    <small style="color: #888;">React to mid frequencies (vocals, guitar)</small>
+                </div>
+                <div class="settings-group">
+                    <label for="trebleResponseSlider">Treble Response: <span id="trebleResponseValue">1.0</span></label>
+                    <input 
+                        type="range" 
+                        id="trebleResponseSlider" 
+                        min="0" 
+                        max="3" 
+                        step="0.1"
+                        value="1.0" 
+                        class="input-slider"
+                    >
+                    <small style="color: #888;">React to high frequencies (hi-hats, cymbals)</small>
+                </div>
+
+                <!-- Dynamics -->
+                <h4 style="color: #00d4ff; margin-top: 15px; margin-bottom: 10px;">Dynamics</h4>
+                <div class="settings-group">
+                    <label for="attackSpeedSlider">Attack Speed: <span id="attackSpeedValue">0.8</span></label>
+                    <input 
+                        type="range" 
+                        id="attackSpeedSlider" 
+                        min="0.1" 
+                        max="1" 
+                        step="0.05"
+                        value="0.8" 
+                        class="input-slider"
+                    >
+                    <small style="color: #888;">How fast effects respond to volume spikes</small>
+                </div>
+                <div class="settings-group">
+                    <label for="decaySpeedSlider">Decay Speed: <span id="decaySpeedValue">0.3</span></label>
+                    <input 
+                        type="range" 
+                        id="decaySpeedSlider" 
+                        min="0.01" 
+                        max="1" 
+                        step="0.01"
+                        value="0.3" 
+                        class="input-slider"
+                    >
+                    <small style="color: #888;">How fast effects fade when volume drops</small>
+                </div>
+                <div class="settings-group">
+                    <label for="smoothingSlider">Smoothing: <span id="smoothingValue">0.5</span></label>
+                    <input 
+                        type="range" 
+                        id="smoothingSlider" 
+                        min="0" 
+                        max="0.95" 
+                        step="0.05"
+                        value="0.5" 
+                        class="input-slider"
+                    >
+                    <small style="color: #888;">Smooth out rapid audio changes</small>
+                </div>
+
+                <!-- ASCII Effects -->
+                <h4 style="color: #00d4ff; margin-top: 15px; margin-bottom: 10px;">ASCII Art Effects</h4>
+                <div class="settings-group">
+                    <label for="asciiResolutionSlider">Resolution (Character Width): <span id="asciiResolutionValue">0</span></label>
+                    <input 
+                        type="range" 
+                        id="asciiResolutionSlider" 
+                        min="-50" 
+                        max="50" 
+                        step="1"
+                        value="0" 
+                        class="input-slider"
+                    >
+                    <small style="color: #888;">Adjusts character size based on audio</small>
+                </div>
+                <div class="settings-group">
+                    <label for="asciiBrightnessSlider">Brightness Change: <span id="asciiBrightnessValue">50</span></label>
+                    <input 
+                        type="range" 
+                        id="asciiBrightnessSlider" 
+                        min="-100" 
+                        max="100" 
+                        step="1"
+                        value="50" 
+                        class="input-slider"
+                    >
+                </div>
+                <div class="settings-group">
+                    <label for="asciiContrastSlider">Contrast Change: <span id="asciiContrastValue">0</span></label>
+                    <input 
+                        type="range" 
+                        id="asciiContrastSlider" 
+                        min="-100" 
+                        max="100" 
+                        step="1"
+                        value="0" 
+                        class="input-slider"
+                    >
+                </div>
+                <div class="settings-group">
+                    <label for="asciiOpacitySlider">Opacity Change: <span id="asciiOpacityValue">0</span></label>
+                    <input 
+                        type="range" 
+                        id="asciiOpacitySlider" 
+                        min="-100" 
+                        max="100" 
+                        step="1"
+                        value="0" 
+                        class="input-slider"
+                    >
+                </div>
+                <div class="settings-group">
+                    <label for="asciiHueShiftSlider">Hue Shift: <span id="asciiHueShiftValue">0</span>°</label>
+                    <input 
+                        type="range" 
+                        id="asciiHueShiftSlider" 
+                        min="-180" 
+                        max="180" 
+                        step="5"
+                        value="0" 
+                        class="input-slider"
+                    >
+                    <small style="color: #888;">Rotate colors based on audio</small>
+                </div>
+                <div class="settings-group">
+                    <label for="asciiSaturationSlider">Saturation Change: <span id="asciiSaturationValue">0</span></label>
+                    <input 
+                        type="range" 
+                        id="asciiSaturationSlider" 
+                        min="-100" 
+                        max="100" 
+                        step="5"
+                        value="0" 
+                        class="input-slider"
+                    >
+                </div>
+
+                <!-- Overlay Effects -->
+                <h4 style="color: #00d4ff; margin-top: 15px; margin-bottom: 10px;">Overlay Effects</h4>
+                <div class="settings-group">
+                    <label for="overlaySizeChangeSlider">Size Change: <span id="overlaySizeChangeValue">100</span>px</label>
+                    <input 
+                        type="range" 
+                        id="overlaySizeChangeSlider" 
+                        min="-200" 
+                        max="200" 
+                        step="5"
+                        value="100" 
+                        class="input-slider"
+                    >
+                </div>
+                <div class="settings-group">
+                    <label for="overlayBrightnessChangeSlider">Brightness Change: <span id="overlayBrightnessChangeValue">0</span></label>
+                    <input 
+                        type="range" 
+                        id="overlayBrightnessChangeSlider" 
+                        min="-100" 
+                        max="100" 
+                        step="1"
+                        value="0" 
+                        class="input-slider"
+                    >
+                </div>
+                <div class="settings-group">
+                    <label for="overlayContrastChangeSlider">Contrast Change: <span id="overlayContrastChangeValue">0</span></label>
+                    <input 
+                        type="range" 
+                        id="overlayContrastChangeSlider" 
+                        min="-100" 
+                        max="100" 
+                        step="1"
+                        value="0" 
+                        class="input-slider"
+                    >
+                </div>
+                <div class="settings-group">
+                    <label for="overlayOpacityChangeSlider">Opacity Change: <span id="overlayOpacityChangeValue">0</span></label>
+                    <input 
+                        type="range" 
+                        id="overlayOpacityChangeSlider" 
+                        min="-100" 
+                        max="100" 
+                        step="1"
+                        value="0" 
+                        class="input-slider"
+                    >
+                </div>
+                <div class="settings-group">
+                    <label for="overlayXChangeSlider">X Position Change: <span id="overlayXChangeValue">0</span>px</label>
+                    <input 
+                        type="range" 
+                        id="overlayXChangeSlider" 
+                        min="-200" 
+                        max="200" 
+                        step="5"
+                        value="0" 
+                        class="input-slider"
+                    >
+                    <small style="color: #888;">Horizontal movement with audio</small>
+                </div>
+                <div class="settings-group">
+                    <label for="overlayYChangeSlider">Y Position Change: <span id="overlayYChangeValue">0</span>px</label>
+                    <input 
+                        type="range" 
+                        id="overlayYChangeSlider" 
+                        min="-200" 
+                        max="200" 
+                        step="5"
+                        value="0" 
+                        class="input-slider"
+                    >
+                    <small style="color: #888;">Vertical movement with audio</small>
+                </div>
+
+                <!-- Export Options -->
+                <h4 style="color: #00d4ff; margin-top: 15px; margin-bottom: 10px;">Export Options</h4>
+                <div class="settings-group">
+                    <label>
+                        <input type="checkbox" id="exportFullAudioToggle" style="width: 20px; height: 20px; cursor: pointer;">
+                        Export Full Audio Length
+                    </label>
+                    <small style="color: #888;">Generate video matching full audio duration with synced effects</small>
                 </div>
             </section>
 

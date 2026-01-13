@@ -59,6 +59,69 @@ let isDraggingOverlay = false;
 let dragStartX = 0;
 let dragStartY = 0;
 
+// Sound Reactive variables
+let soundReactiveEnabled = false;
+let audioContext = null;
+let audioAnalyser = null;
+let audioSource = null;
+let audioBuffer = null;
+let audioFile = null;
+let volumeSensitivity = 1.0;
+
+// Frequency response settings
+let bassResponse = 1.0;
+let midResponse = 1.0;
+let trebleResponse = 1.0;
+
+// Dynamics settings
+let attackSpeed = 0.8;
+let decaySpeed = 0.3;
+let smoothing = 0.5;
+let smoothedAudioLevel = 0;
+
+// ASCII effect settings
+let asciiResolutionChange = 0;
+let asciiBrightnessChange = 50;
+let asciiContrastChange = 0;
+let asciiOpacityChange = 0;
+let asciiHueShift = 0;
+let asciiSaturationChange = 0;
+
+// Overlay effect settings
+let overlaySizeChange = 100;
+let overlayBrightnessChange = 0;
+let overlayContrastChange = 0;
+let overlayOpacityChange = 0;
+let overlayXChange = 0;
+let overlayYChange = 0;
+
+// Export options
+let exportFullAudio = false;
+
+let currentAudioLevel = 0; // 0-1 normalized
+let audioFrequencyData = new Uint8Array(256);
+let lastAudioAnalysisTime = 0;
+let soundReactiveEffects = {
+    asciiResolution: 0,
+    asciiBrightness: 0,
+    asciiContrast: 100,
+    asciiOpacity: 100,
+    asciiHueShift: 0,
+    asciiSaturation: 100,
+    overlaySize: 0,
+    overlayBrightness: 0,
+    overlayContrast: 100,
+    overlayOpacity: 100,
+    overlayX: 0,
+    overlayY: 0
+};
+
+// Audio playback variables
+let audioElement = null;
+let isAudioPlaying = false;
+let audioAnimationId = null;
+let audioSourceNode = null; // Track if we've connected the source
+
 // Character mapping for brightness levels - array of arrays for variation
 const CHARACTER_MAP = [
     [' ', '.', ','],                                    // 0-12.5%
@@ -448,7 +511,8 @@ function setupEventListeners() {
         document.getElementById('overlayEffectsControls').style.display = overlayEnabled ? 'grid' : 'none';
         
         const overlayImage = document.getElementById('overlayImage');
-        if (overlayEnabled && overlayImageData) {
+        // Only show HTML overlay if not in sound reactive mode (canvas draws it then)
+        if (overlayEnabled && overlayImageData && !soundReactiveEnabled) {
             overlayImage.style.display = 'block';
             updateOverlayPosition();
             updateOverlayStyles();
@@ -567,6 +631,241 @@ function setupEventListeners() {
     overlayImage.addEventListener('mousedown', startDraggingOverlay);
     document.addEventListener('mousemove', dragOverlay);
     document.addEventListener('mouseup', stopDraggingOverlay);
+
+    // Sound Reactive Audio Upload
+    const audioInput = document.getElementById('audioInput');
+    if (audioInput) {
+        audioInput.addEventListener('change', handleAudioInput);
+    }
+
+    // Sound Reactive Toggle
+    const soundReactiveToggle = document.getElementById('soundReactiveToggle');
+    if (soundReactiveToggle) {
+        soundReactiveToggle.addEventListener('change', (e) => {
+            soundReactiveEnabled = e.target.checked;
+            
+            // Hide/show HTML overlay based on sound reactive mode
+            // When sound reactive is enabled, canvas draws the overlay with effects
+            const overlayImage = document.getElementById('overlayImage');
+            if (soundReactiveEnabled && overlayEnabled && overlayImageData) {
+                overlayImage.style.display = 'none';
+            } else if (!soundReactiveEnabled && overlayEnabled && overlayImageData) {
+                overlayImage.style.display = 'block';
+                updateOverlayPosition();
+                updateOverlayStyles();
+            }
+            
+            if (currentImageData) {
+                if (soundReactiveEnabled) {
+                    initializeAudioContext();
+                }
+                generatePreview();
+            }
+        });
+    }
+
+    // Volume Sensitivity slider
+    const volumeSensitivitySlider = document.getElementById('volumeSensitivitySlider');
+    if (volumeSensitivitySlider) {
+        volumeSensitivitySlider.addEventListener('input', (e) => {
+            volumeSensitivity = parseFloat(e.target.value);
+            document.getElementById('volumeSensitivityValue').textContent = volumeSensitivity.toFixed(1);
+        });
+    }
+
+    // Bass Response slider
+    const bassResponseSlider = document.getElementById('bassResponseSlider');
+    if (bassResponseSlider) {
+        bassResponseSlider.addEventListener('input', (e) => {
+            bassResponse = parseFloat(e.target.value);
+            document.getElementById('bassResponseValue').textContent = bassResponse.toFixed(1);
+        });
+    }
+
+    // Mid Response slider
+    const midResponseSlider = document.getElementById('midResponseSlider');
+    if (midResponseSlider) {
+        midResponseSlider.addEventListener('input', (e) => {
+            midResponse = parseFloat(e.target.value);
+            document.getElementById('midResponseValue').textContent = midResponse.toFixed(1);
+        });
+    }
+
+    // Treble Response slider
+    const trebleResponseSlider = document.getElementById('trebleResponseSlider');
+    if (trebleResponseSlider) {
+        trebleResponseSlider.addEventListener('input', (e) => {
+            trebleResponse = parseFloat(e.target.value);
+            document.getElementById('trebleResponseValue').textContent = trebleResponse.toFixed(1);
+        });
+    }
+
+    // Attack Speed slider
+    const attackSpeedSlider = document.getElementById('attackSpeedSlider');
+    if (attackSpeedSlider) {
+        attackSpeedSlider.addEventListener('input', (e) => {
+            attackSpeed = parseFloat(e.target.value);
+            document.getElementById('attackSpeedValue').textContent = attackSpeed.toFixed(2);
+        });
+    }
+
+    // Decay Speed slider
+    const decaySpeedSlider = document.getElementById('decaySpeedSlider');
+    if (decaySpeedSlider) {
+        decaySpeedSlider.addEventListener('input', (e) => {
+            decaySpeed = parseFloat(e.target.value);
+            document.getElementById('decaySpeedValue').textContent = decaySpeed.toFixed(2);
+        });
+    }
+
+    // Smoothing slider
+    const smoothingSlider = document.getElementById('smoothingSlider');
+    if (smoothingSlider) {
+        smoothingSlider.addEventListener('input', (e) => {
+            smoothing = parseFloat(e.target.value);
+            document.getElementById('smoothingValue').textContent = smoothing.toFixed(2);
+        });
+    }
+
+    // ASCII Resolution slider
+    const asciiResolutionSlider = document.getElementById('asciiResolutionSlider');
+    if (asciiResolutionSlider) {
+        asciiResolutionSlider.addEventListener('input', (e) => {
+            asciiResolutionChange = parseInt(e.target.value);
+            document.getElementById('asciiResolutionValue').textContent = asciiResolutionChange;
+        });
+    }
+
+    // ASCII Brightness slider
+    const asciiBrightnessSlider = document.getElementById('asciiBrightnessSlider');
+    if (asciiBrightnessSlider) {
+        asciiBrightnessSlider.addEventListener('input', (e) => {
+            asciiBrightnessChange = parseInt(e.target.value);
+            document.getElementById('asciiBrightnessValue').textContent = asciiBrightnessChange;
+        });
+    }
+
+    // ASCII Contrast slider
+    const asciiContrastSlider = document.getElementById('asciiContrastSlider');
+    if (asciiContrastSlider) {
+        asciiContrastSlider.addEventListener('input', (e) => {
+            asciiContrastChange = parseInt(e.target.value);
+            document.getElementById('asciiContrastValue').textContent = asciiContrastChange;
+        });
+    }
+
+    // ASCII Opacity slider
+    const asciiOpacitySlider = document.getElementById('asciiOpacitySlider');
+    if (asciiOpacitySlider) {
+        asciiOpacitySlider.addEventListener('input', (e) => {
+            asciiOpacityChange = parseInt(e.target.value);
+            document.getElementById('asciiOpacityValue').textContent = asciiOpacityChange;
+        });
+    }
+
+    // ASCII Hue Shift slider
+    const asciiHueShiftSlider = document.getElementById('asciiHueShiftSlider');
+    if (asciiHueShiftSlider) {
+        asciiHueShiftSlider.addEventListener('input', (e) => {
+            asciiHueShift = parseInt(e.target.value);
+            document.getElementById('asciiHueShiftValue').textContent = asciiHueShift;
+        });
+    }
+
+    // ASCII Saturation slider
+    const asciiSaturationSlider = document.getElementById('asciiSaturationSlider');
+    if (asciiSaturationSlider) {
+        asciiSaturationSlider.addEventListener('input', (e) => {
+            asciiSaturationChange = parseInt(e.target.value);
+            document.getElementById('asciiSaturationValue').textContent = asciiSaturationChange;
+        });
+    }
+
+    // Overlay Size Change slider
+    const overlaySizeChangeSlider = document.getElementById('overlaySizeChangeSlider');
+    if (overlaySizeChangeSlider) {
+        overlaySizeChangeSlider.addEventListener('input', (e) => {
+            overlaySizeChange = parseInt(e.target.value);
+            document.getElementById('overlaySizeChangeValue').textContent = overlaySizeChange;
+        });
+    }
+
+    // Overlay Brightness Change slider
+    const overlayBrightnessChangeSlider = document.getElementById('overlayBrightnessChangeSlider');
+    if (overlayBrightnessChangeSlider) {
+        overlayBrightnessChangeSlider.addEventListener('input', (e) => {
+            overlayBrightnessChange = parseInt(e.target.value);
+            document.getElementById('overlayBrightnessChangeValue').textContent = overlayBrightnessChange;
+        });
+    }
+
+    // Overlay Contrast Change slider
+    const overlayContrastChangeSlider = document.getElementById('overlayContrastChangeSlider');
+    if (overlayContrastChangeSlider) {
+        overlayContrastChangeSlider.addEventListener('input', (e) => {
+            overlayContrastChange = parseInt(e.target.value);
+            document.getElementById('overlayContrastChangeValue').textContent = overlayContrastChange;
+        });
+    }
+
+    // Overlay Opacity Change slider
+    const overlayOpacityChangeSlider = document.getElementById('overlayOpacityChangeSlider');
+    if (overlayOpacityChangeSlider) {
+        overlayOpacityChangeSlider.addEventListener('input', (e) => {
+            overlayOpacityChange = parseInt(e.target.value);
+            document.getElementById('overlayOpacityChangeValue').textContent = overlayOpacityChange;
+        });
+    }
+
+    // Overlay X Position Change slider
+    const overlayXChangeSlider = document.getElementById('overlayXChangeSlider');
+    if (overlayXChangeSlider) {
+        overlayXChangeSlider.addEventListener('input', (e) => {
+            overlayXChange = parseInt(e.target.value);
+            document.getElementById('overlayXChangeValue').textContent = overlayXChange;
+        });
+    }
+
+    // Overlay Y Position Change slider
+    const overlayYChangeSlider = document.getElementById('overlayYChangeSlider');
+    if (overlayYChangeSlider) {
+        overlayYChangeSlider.addEventListener('input', (e) => {
+            overlayYChange = parseInt(e.target.value);
+            document.getElementById('overlayYChangeValue').textContent = overlayYChange;
+        });
+    }
+
+    // Export Full Audio toggle
+    const exportFullAudioToggle = document.getElementById('exportFullAudioToggle');
+    if (exportFullAudioToggle) {
+        exportFullAudioToggle.addEventListener('change', (e) => {
+            exportFullAudio = e.target.checked;
+        });
+    }
+
+    // Audio Player Controls
+    const playAudioButton = document.getElementById('playAudioButton');
+    const pauseAudioButton = document.getElementById('pauseAudioButton');
+    const stopAudioButton = document.getElementById('stopAudioButton');
+    const audioProgressBar = document.getElementById('audioProgressBar');
+    
+    if (playAudioButton) {
+        playAudioButton.addEventListener('click', playAudio);
+    }
+    if (pauseAudioButton) {
+        pauseAudioButton.addEventListener('click', pauseAudio);
+    }
+    if (stopAudioButton) {
+        stopAudioButton.addEventListener('click', stopAudio);
+    }
+    if (audioProgressBar) {
+        audioProgressBar.addEventListener('click', (e) => {
+            if (!audioElement) return;
+            const rect = audioProgressBar.getBoundingClientRect();
+            const percent = (e.clientX - rect.left) / rect.width;
+            audioElement.currentTime = percent * audioElement.duration;
+        });
+    }
 
     // Button handlers
     generateButton.addEventListener('click', generateVideo);
@@ -745,6 +1044,8 @@ async function loadDefaultImage() {
                 showStatus('Default image loaded successfully.', 'success');
                 // Load default overlay
                 loadDefaultOverlay();
+                // Load default audio
+                loadDefaultAudio();
                 // Initialize mode settings visibility
                 updateModeSettings(currentMode);
             };
@@ -776,12 +1077,14 @@ async function loadDefaultOverlay() {
                 document.getElementById('overlayPositioningControls').style.display = 'grid';
                 document.getElementById('overlayEffectsControls').style.display = 'grid';
                 
-                // Display overlay image
+                // Display overlay image - only show HTML element if not in sound reactive mode
                 const overlayImage = document.getElementById('overlayImage');
                 overlayImage.src = img.src;
-                overlayImage.style.display = 'block';
-                updateOverlayPosition();
-                updateOverlayStyles();
+                if (!soundReactiveEnabled) {
+                    overlayImage.style.display = 'block';
+                    updateOverlayPosition();
+                    updateOverlayStyles();
+                }
                 
                 if (currentImageData) {
                     generatePreview();
@@ -791,6 +1094,439 @@ async function loadDefaultOverlay() {
         }
     } catch (error) {
         // Silently fail if default overlay doesn't exist
+    }
+}
+
+/**
+ * Load default audio file
+ */
+async function loadDefaultAudio() {
+    try {
+        const response = await fetch('music/944_Pilot_Mastered.mp3');
+        
+        if (response.ok) {
+            const blob = await response.blob();
+            
+            // Reset the audio source node
+            audioSourceNode = null;
+            
+            // Create audio element
+            if (audioElement) {
+                audioElement.pause();
+                audioElement.src = '';
+            }
+            
+            audioElement = new Audio();
+            audioElement.src = URL.createObjectURL(blob);
+            audioElement.crossOrigin = 'anonymous';
+            
+            // Show audio player controls
+            const playerControls = document.getElementById('audioPlayerControls');
+            if (playerControls) {
+                playerControls.style.display = 'block';
+            }
+            
+            // Update duration display when metadata loads
+            audioElement.onloadedmetadata = () => {
+                updateAudioTimeDisplay();
+            };
+            
+            // Update progress during playback
+            audioElement.ontimeupdate = () => {
+                updateAudioProgress();
+            };
+            
+            // Handle playback end
+            audioElement.onended = () => {
+                stopAudio();
+            };
+            
+            // Decode audio data for video generation (offline analysis)
+            try {
+                const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+                const offlineContext = new AudioContextClass();
+                
+                // Decode audio data for analysis
+                const arrayBuffer = await blob.arrayBuffer();
+                audioBuffer = await offlineContext.decodeAudioData(arrayBuffer);
+                
+                console.log('Default audio loaded successfully');
+            } catch (error) {
+                console.error('Error decoding audio:', error);
+            }
+        }
+    } catch (error) {
+        // Silently fail if default audio doesn't exist
+        console.log('Default audio file not found');
+    }
+}
+
+/**
+ * Handle audio file input and initialization
+ */
+function handleAudioInput(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    audioFile = file;
+    const reader = new FileReader();
+    
+    reader.onload = (event) => {
+        // Decode audio data
+        if (!audioContext) {
+            initializeAudioContext();
+        }
+        
+        audioContext.decodeAudioData(event.target.result, (buffer) => {
+            audioBuffer = buffer;
+            showStatus(`Audio loaded: ${file.name}`, 'success');
+        }, (error) => {
+            console.error('Error decoding audio:', error);
+            showStatus('Error loading audio file', 'error');
+        });
+    };
+    
+    reader.readAsArrayBuffer(file);
+}
+
+/**
+ * Initialize Web Audio API context and analyser
+ */
+function initializeAudioContext() {
+    if (!audioContext) {
+        const AudioContext = window.AudioContext || window.webkitAudioContext;
+        audioContext = new AudioContext();
+    }
+    
+    if (!audioAnalyser) {
+        audioAnalyser = audioContext.createAnalyser();
+        audioAnalyser.fftSize = 512;
+        audioAnalyser.connect(audioContext.destination);
+    }
+}
+
+/**
+ * Get current audio level (0-1 normalized) with frequency band analysis
+ */
+function getCurrentAudioLevel() {
+    if (!audioAnalyser || !soundReactiveEnabled) {
+        return 0;
+    }
+    
+    // Make sure frequency data array is properly sized
+    if (!audioFrequencyData || audioFrequencyData.length !== audioAnalyser.frequencyBinCount) {
+        audioFrequencyData = new Uint8Array(audioAnalyser.frequencyBinCount);
+    }
+    
+    audioAnalyser.getByteFrequencyData(audioFrequencyData);
+    
+    const binCount = audioFrequencyData.length;
+    const bassEnd = Math.floor(binCount * 0.15);    // ~0-300Hz
+    const midEnd = Math.floor(binCount * 0.5);       // ~300-2000Hz
+    
+    let bassSum = 0, midSum = 0, trebleSum = 0;
+    
+    // Calculate frequency band levels
+    for (let i = 0; i < binCount; i++) {
+        if (i < bassEnd) {
+            bassSum += audioFrequencyData[i] * bassResponse;
+        } else if (i < midEnd) {
+            midSum += audioFrequencyData[i] * midResponse;
+        } else {
+            trebleSum += audioFrequencyData[i] * trebleResponse;
+        }
+    }
+    
+    // Weighted average based on frequency response settings
+    const bassLevel = bassSum / (bassEnd || 1);
+    const midLevel = midSum / (midEnd - bassEnd || 1);
+    const trebleLevel = trebleSum / (binCount - midEnd || 1);
+    
+    const rawLevel = (bassLevel + midLevel + trebleLevel) / 3 / 255;
+    
+    // Apply attack/decay dynamics
+    if (rawLevel > smoothedAudioLevel) {
+        // Attack - rise quickly
+        smoothedAudioLevel += (rawLevel - smoothedAudioLevel) * attackSpeed;
+    } else {
+        // Decay - fall according to decay speed
+        smoothedAudioLevel -= (smoothedAudioLevel - rawLevel) * decaySpeed;
+    }
+    
+    // Apply smoothing
+    currentAudioLevel = smoothedAudioLevel * (1 - smoothing) + currentAudioLevel * smoothing;
+    currentAudioLevel = Math.max(0, Math.min(1, currentAudioLevel));
+    
+    return currentAudioLevel;
+}
+
+/**
+ * Update sound reactive effects based on current audio level
+ */
+function updateSoundReactiveEffects() {
+    if (!soundReactiveEnabled || !audioAnalyser) {
+        return soundReactiveEffects;
+    }
+    
+    const level = getCurrentAudioLevel();
+    const sensitivityFactor = volumeSensitivity;
+    
+    // Apply ASCII effects based on audio level
+    soundReactiveEffects.asciiResolution = asciiResolutionChange * level * sensitivityFactor;
+    soundReactiveEffects.asciiBrightness = asciiBrightnessChange * level * sensitivityFactor;
+    soundReactiveEffects.asciiContrast = 100 + (asciiContrastChange * level * sensitivityFactor);
+    soundReactiveEffects.asciiOpacity = 100 + (asciiOpacityChange * level * sensitivityFactor);
+    soundReactiveEffects.asciiHueShift = asciiHueShift * level * sensitivityFactor;
+    soundReactiveEffects.asciiSaturation = 100 + (asciiSaturationChange * level * sensitivityFactor);
+    
+    // Apply overlay effects based on audio level
+    soundReactiveEffects.overlaySize = overlaySizeChange * level * sensitivityFactor;
+    soundReactiveEffects.overlayBrightness = overlayBrightnessChange * level * sensitivityFactor;
+    soundReactiveEffects.overlayContrast = 100 + (overlayContrastChange * level * sensitivityFactor);
+    soundReactiveEffects.overlayOpacity = 100 + (overlayOpacityChange * level * sensitivityFactor);
+    soundReactiveEffects.overlayX = overlayXChange * level * sensitivityFactor;
+    soundReactiveEffects.overlayY = overlayYChange * level * sensitivityFactor;
+    
+    return soundReactiveEffects;
+}
+
+/**
+ * Handle audio file upload
+ */
+async function handleAudioInput(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    audioFile = file;
+    
+    // Reset the audio source node when loading a new file
+    audioSourceNode = null;
+    
+    // Create audio element for playback
+    if (audioElement) {
+        audioElement.pause();
+        audioElement.src = '';
+    }
+    
+    audioElement = new Audio();
+    audioElement.src = URL.createObjectURL(file);
+    audioElement.crossOrigin = 'anonymous';
+    
+    // Show audio player controls
+    const playerControls = document.getElementById('audioPlayerControls');
+    if (playerControls) {
+        playerControls.style.display = 'block';
+    }
+    
+    // Update duration display when metadata loads
+    audioElement.onloadedmetadata = () => {
+        updateAudioTimeDisplay();
+    };
+    
+    // Update progress during playback
+    audioElement.ontimeupdate = () => {
+        updateAudioProgress();
+    };
+    
+    // Handle playback end
+    audioElement.onended = () => {
+        stopAudio();
+    };
+    
+    // Decode audio data for video generation (offline analysis)
+    try {
+        const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+        const offlineContext = new AudioContextClass();
+        
+        // Decode audio data for analysis
+        const arrayBuffer = await file.arrayBuffer();
+        audioBuffer = await offlineContext.decodeAudioData(arrayBuffer);
+        
+        console.log('Audio file loaded successfully');
+    } catch (error) {
+        console.error('Error loading audio:', error);
+        showStatus('Error loading audio file', 'error');
+    }
+}
+
+/**
+ * Play audio
+ */
+function playAudio() {
+    if (!audioElement) return;
+    
+    // Initialize audio context if not done
+    if (!audioContext) {
+        const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+        audioContext = new AudioContextClass();
+    }
+    
+    // Resume audio context if suspended (browser requirement)
+    if (audioContext.state === 'suspended') {
+        audioContext.resume();
+    }
+    
+    // Create analyser if not exists
+    if (!audioAnalyser) {
+        audioAnalyser = audioContext.createAnalyser();
+        audioAnalyser.fftSize = 256;
+        audioFrequencyData = new Uint8Array(audioAnalyser.frequencyBinCount);
+    }
+    
+    // Connect audio element to analyser (only once per element)
+    if (!audioSourceNode && audioContext.createMediaElementSource) {
+        try {
+            audioSourceNode = audioContext.createMediaElementSource(audioElement);
+            audioSourceNode.connect(audioAnalyser);
+            audioAnalyser.connect(audioContext.destination);
+            console.log('Audio source connected to analyser');
+        } catch (error) {
+            console.log('Audio source connection error:', error.message);
+        }
+    }
+    
+    audioElement.play().catch(error => {
+        console.error('Error playing audio:', error);
+    });
+    
+    isAudioPlaying = true;
+    
+    // Update button states
+    const playBtn = document.getElementById('playAudioButton');
+    const pauseBtn = document.getElementById('pauseAudioButton');
+    if (playBtn) playBtn.style.display = 'none';
+    if (pauseBtn) pauseBtn.style.display = 'inline-block';
+}
+
+/**
+ * Pause audio
+ */
+function pauseAudio() {
+    if (!audioElement) return;
+    
+    audioElement.pause();
+    isAudioPlaying = false;
+    
+    // Update button states
+    const playBtn = document.getElementById('playAudioButton');
+    const pauseBtn = document.getElementById('pauseAudioButton');
+    if (playBtn) playBtn.style.display = 'inline-block';
+    if (pauseBtn) pauseBtn.style.display = 'none';
+}
+
+/**
+ * Stop audio
+ */
+function stopAudio() {
+    if (!audioElement) return;
+    
+    audioElement.pause();
+    audioElement.currentTime = 0;
+    isAudioPlaying = false;
+    
+    // Update button states
+    const playBtn = document.getElementById('playAudioButton');
+    const pauseBtn = document.getElementById('pauseAudioButton');
+    if (playBtn) playBtn.style.display = 'inline-block';
+    if (pauseBtn) pauseBtn.style.display = 'none';
+    
+    // Update progress display
+    updateAudioProgress();
+}
+
+/**
+ * Update audio progress bar and time display
+ */
+function updateAudioProgress() {
+    if (!audioElement) return;
+    
+    const duration = audioElement.duration || 0;
+    const currentTime = audioElement.currentTime || 0;
+    const percent = duration > 0 ? (currentTime / duration) * 100 : 0;
+    
+    const progressFill = document.getElementById('audioProgressFill');
+    if (progressFill) {
+        progressFill.style.width = `${percent}%`;
+    }
+    
+    updateAudioTimeDisplay();
+}
+
+/**
+ * Update audio time display
+ */
+function updateAudioTimeDisplay() {
+    if (!audioElement) return;
+    
+    const duration = audioElement.duration || 0;
+    const currentTime = audioElement.currentTime || 0;
+    
+    const formatTime = (seconds) => {
+        const mins = Math.floor(seconds / 60);
+        const secs = Math.floor(seconds % 60);
+        return `${mins}:${secs.toString().padStart(2, '0')}`;
+    };
+    
+    const timeDisplay = document.getElementById('audioTimeDisplay');
+    if (timeDisplay) {
+        timeDisplay.textContent = `${formatTime(currentTime)} / ${formatTime(duration)}`;
+    }
+}
+
+/**
+ * Load audio for video generation (creates playable element)
+ */
+function createAudioElement() {
+    if (!audioFile) return null;
+    
+    const audio = new Audio();
+    audio.src = URL.createObjectURL(audioFile);
+    audio.crossOrigin = 'anonymous';
+    
+    return audio;
+}
+
+/**
+ * Get audio level at specific time in audio file
+ */
+async function getAudioLevelAtTime(time, audio, audioBuffer) {
+    if (!audio || !audioBuffer || !audioContext) {
+        return 0;
+    }
+    
+    // For video generation, we'll use pre-analyzed data
+    // This is a simplified version - for production, you'd want to pre-analyze the entire audio
+    try {
+        const offlineContext = new (window.OfflineAudioContext || window.webkitOfflineAudioContext)(
+            audioBuffer.numberOfChannels,
+            audioBuffer.length,
+            audioBuffer.sampleRate
+        );
+        
+        const source = offlineContext.createBufferSource();
+        source.buffer = audioBuffer;
+        
+        const analyser = offlineContext.createAnalyser();
+        source.connect(analyser);
+        analyser.connect(offlineContext.destination);
+        
+        // This is simplified - in practice you'd need frame-by-frame analysis
+        // For now, we'll return a simple calculation based on time
+        const sampleIndex = Math.floor((time / audioBuffer.duration) * audioBuffer.length);
+        const channelData = audioBuffer.getChannelData(0);
+        
+        let sum = 0;
+        const windowSize = Math.floor(audioBuffer.sampleRate / 30); // Roughly per-frame
+        for (let i = sampleIndex; i < Math.min(sampleIndex + windowSize, audioBuffer.length); i++) {
+            sum += Math.abs(channelData[i]);
+        }
+        
+        const average = sum / windowSize;
+        return Math.min(1, average * 2); // Normalize
+        
+    } catch (error) {
+        console.error('Error analyzing audio:', error);
+        return 0;
     }
 }
 
@@ -973,12 +1709,14 @@ function handleOverlayImageInput(event) {
                     document.getElementById('overlayEffectsControls').style.display = 'grid';
                 }
                 
-                // Display overlay image
+                // Display overlay image - only show HTML element if not in sound reactive mode
                 const overlayImage = document.getElementById('overlayImage');
                 overlayImage.src = img.src;
-                overlayImage.style.display = 'block';
-                updateOverlayPosition();
-                updateOverlayStyles();
+                if (!soundReactiveEnabled) {
+                    overlayImage.style.display = 'block';
+                    updateOverlayPosition();
+                    updateOverlayStyles();
+                }
                 
                 if (currentImageData) {
                     generatePreview();
@@ -1446,6 +2184,9 @@ function generatePreview() {
     animationLoop = setInterval(() => {
         const ctx = outputCanvas.getContext('2d', { willReadFrequently: true });
 
+        // Update sound reactive effects if enabled
+        updateSoundReactiveEffects();
+
         // Clear canvas
         ctx.fillStyle = '#000000';
         ctx.fillRect(0, 0, OUTPUT_WIDTH, canvasHeight);
@@ -1453,10 +2194,17 @@ function generatePreview() {
         // Get ASCII frame for this mode
         let asciiFrame = null;
         let renderCharHeight = charHeight;
+        let currentCharWidthForThisFrame = currentCharWidth;
+        
+        // Apply sound reactive resolution change
+        if (soundReactiveEnabled && asciiResolutionChange !== 0) {
+            const resolutionAdjust = soundReactiveEffects.asciiResolution;
+            currentCharWidthForThisFrame = Math.max(10, Math.round(currentCharWidth + resolutionAdjust));
+        }
         
         if (currentMode === 'original') {
             // Regenerate every frame for random characters
-            asciiFrame = convertFrameToASCII(currentImageData, currentCharWidth, charHeight);
+            asciiFrame = convertFrameToASCII(currentImageData, currentCharWidthForThisFrame, charHeight);
         } else if (currentMode === 'scroll') {
             asciiFrame = shiftASCIIFrame(baseASCIIFrame, frameCount % currentCharWidth);
         } else if (currentMode === 'zoom') {
@@ -1466,21 +2214,78 @@ function generatePreview() {
             asciiFrame = convertFrameToASCII(currentImageData, zoomCharWidth, renderCharHeight);
         } else if (currentMode === 'flag') {
             // Flag mode: static ASCII with waving animation (loops continuously)
-            asciiFrame = convertFrameToASCII(currentImageData, currentCharWidth, charHeight);
+            asciiFrame = convertFrameToASCII(currentImageData, currentCharWidthForThisFrame, charHeight);
             const flagProgress = (frameCount % 30) / 30; // Cycle every 30 frames, loops continuously
             renderASCIIFrameWithFlag(asciiFrame, outputCanvas, fontSize, renderCharHeight, flagProgress);
             frameCount++;
             return; // Skip normal render, handled by renderASCIIFrameWithFlag
         } else if (currentMode === 'dither') {
             // Dither mode: static ASCII with ordered dithering pattern
-            asciiFrame = convertFrameToASCIIDither(currentImageData, currentCharWidth, charHeight);
+            asciiFrame = convertFrameToASCIIDither(currentImageData, currentCharWidthForThisFrame, charHeight);
         } else if (currentMode === 'glitch') {
             // Glitch mode: animated random displacement of chunks
-            asciiFrame = convertFrameToASCIIGlitch(currentImageData, currentCharWidth, charHeight, frameCount);
+            asciiFrame = convertFrameToASCIIGlitch(currentImageData, currentCharWidthForThisFrame, charHeight, frameCount);
+        }
+
+        // Store original effects for temporary modification
+        const origBrightness = brightness;
+        const origContrast = contrast;
+        const origOpacity = opacity;
+        const origHue = hue;
+        const origSaturation = saturation;
+        
+        // Apply sound reactive ASCII effects
+        if (soundReactiveEnabled) {
+            brightness = origBrightness + soundReactiveEffects.asciiBrightness;
+            contrast = Math.max(0, soundReactiveEffects.asciiContrast);
+            opacity = Math.max(0, Math.min(100, soundReactiveEffects.asciiOpacity));
+            hue = origHue + soundReactiveEffects.asciiHueShift;
+            saturation = Math.max(0, soundReactiveEffects.asciiSaturation);
         }
 
         // Render ASCII to canvas
         renderASCIIFrame(asciiFrame, outputCanvas, fontSize, renderCharHeight);
+        
+        // Restore original effects
+        brightness = origBrightness;
+        contrast = origContrast;
+        opacity = origOpacity;
+        hue = origHue;
+        saturation = origSaturation;
+        
+        // Render overlay with sound reactive effects
+        if (overlayEnabled && overlayImageData) {
+            // Store original overlay effects
+            const origOverlaySize = overlaySize;
+            const origOverlayBrightness = overlayBrightness;
+            const origOverlayContrast = overlayContrast;
+            const origOverlayOpacity = overlayOpacity;
+            const origOverlayX = overlayX;
+            const origOverlayY = overlayY;
+            const origOverlaySaturation = overlaySaturation;
+            
+            // Apply sound reactive overlay effects
+            if (soundReactiveEnabled) {
+                overlaySize = Math.max(50, origOverlaySize + soundReactiveEffects.overlaySize);
+                overlayBrightness = origOverlayBrightness + soundReactiveEffects.overlayBrightness;
+                overlayContrast = Math.max(0, soundReactiveEffects.overlayContrast);
+                overlayOpacity = Math.max(0, Math.min(100, soundReactiveEffects.overlayOpacity));
+                overlayX = origOverlayX + (soundReactiveEffects.overlayX / OUTPUT_WIDTH * 100);
+                overlayY = origOverlayY + (soundReactiveEffects.overlayY / canvasHeight * 100);
+            }
+            
+            renderOverlayToCanvas(ctx, OUTPUT_WIDTH, canvasHeight);
+            
+            // Restore original overlay effects
+            overlaySize = origOverlaySize;
+            overlayBrightness = origOverlayBrightness;
+            overlayContrast = origOverlayContrast;
+            overlayOpacity = origOverlayOpacity;
+            overlayX = origOverlayX;
+            overlayY = origOverlayY;
+            overlaySaturation = origOverlaySaturation;
+        }
+        
         frameCount++;
     }, frameInterval);
 }
@@ -2002,11 +2807,75 @@ async function generateVideoFromVideo(videoPath, onProgress) {
         const totalFrames = outputDuration * videoFPS;
         const frames = [];
         
+        // Pre-analyze audio if sound reactive is enabled
+        let audioLevelPerFrame = [];
+        if (soundReactiveEnabled && audioBuffer) {
+            const audioSampleRate = audioBuffer.sampleRate;
+            const audioLength = audioBuffer.length;
+            const framesPerAudioSample = audioLength / totalFrames;
+            
+            for (let i = 0; i < totalFrames; i++) {
+                const sampleIndex = Math.floor(i * framesPerAudioSample);
+                const endIndex = Math.min(sampleIndex + Math.floor(framesPerAudioSample), audioLength);
+                
+                let sum = 0;
+                const channelData = audioBuffer.getChannelData(0);
+                
+                for (let j = sampleIndex; j < endIndex; j++) {
+                    sum += Math.abs(channelData[j]);
+                }
+                
+                const average = (endIndex - sampleIndex > 0) ? sum / (endIndex - sampleIndex) : 0;
+                audioLevelPerFrame[i] = Math.min(1, average * 2); // Normalize
+            }
+        }
+        
         // Extract frames from video with looping support
         for (let frameIndex = 0; frameIndex < totalFrames; frameIndex++) {
             // Calculate time in video, looping if necessary
             const time = (frameIndex / videoFPS) % videoDuration;
             video.currentTime = time;
+            
+            // Get current audio level for this frame
+            let currentAudioLevelForFrame = 0;
+            if (soundReactiveEnabled && audioLevelPerFrame[frameIndex] !== undefined) {
+                currentAudioLevelForFrame = audioLevelPerFrame[frameIndex];
+            }
+            
+            // Calculate sound reactive effects for this frame
+            let asciiResolutionForFrame = currentCharWidth;
+            let asciiBrightnessForFrame = brightness;
+            let asciiContrastForFrame = contrast;
+            let asciiOpacityForFrame = opacity;
+            let overlaySizeForFrame = overlaySize;
+            let overlayBrightnessForFrame = overlayBrightness;
+            let overlayContrastForFrame = overlayContrast;
+            let overlayOpacityForFrame = overlayOpacity;
+            
+            if (soundReactiveEnabled && asciiResolutionChange !== 0) {
+                asciiResolutionForFrame = Math.max(10, currentCharWidth + (asciiResolutionChange * currentAudioLevelForFrame * volumeSensitivity));
+            }
+            if (soundReactiveEnabled && asciiBrightnessChange !== 0) {
+                asciiBrightnessForFrame = brightness + (asciiBrightnessChange * currentAudioLevelForFrame * volumeSensitivity);
+            }
+            if (soundReactiveEnabled && asciiContrastChange !== 0) {
+                asciiContrastForFrame = Math.max(0, contrast + (asciiContrastChange * currentAudioLevelForFrame * volumeSensitivity));
+            }
+            if (soundReactiveEnabled && asciiOpacityChange !== 0) {
+                asciiOpacityForFrame = Math.max(0, Math.min(100, opacity + (asciiOpacityChange * currentAudioLevelForFrame * volumeSensitivity)));
+            }
+            if (soundReactiveEnabled && overlaySizeChange !== 0) {
+                overlaySizeForFrame = Math.max(50, overlaySize + (overlaySizeChange * currentAudioLevelForFrame * volumeSensitivity));
+            }
+            if (soundReactiveEnabled && overlayBrightnessChange !== 0) {
+                overlayBrightnessForFrame = overlayBrightness + (overlayBrightnessChange * currentAudioLevelForFrame * volumeSensitivity);
+            }
+            if (soundReactiveEnabled && overlayContrastChange !== 0) {
+                overlayContrastForFrame = Math.max(0, overlayContrast + (overlayContrastChange * currentAudioLevelForFrame * volumeSensitivity));
+            }
+            if (soundReactiveEnabled && overlayOpacityChange !== 0) {
+                overlayOpacityForFrame = Math.max(0, Math.min(100, overlayOpacity + (overlayOpacityChange * currentAudioLevelForFrame * volumeSensitivity)));
+            }
             
             // Wait for frame to load
             await new Promise((resolve) => {
@@ -2035,9 +2904,9 @@ async function generateVideoFromVideo(videoPath, onProgress) {
                     let asciiFrame;
                     
                     if (currentMode === 'original') {
-                        asciiFrame = convertFrameToASCII(frameData, currentCharWidth, charHeight);
+                        asciiFrame = convertFrameToASCII(frameData, asciiResolutionForFrame, charHeight);
                     } else if (currentMode === 'scroll') {
-                        asciiFrame = convertFrameToASCII(frameData, currentCharWidth, charHeight);
+                        asciiFrame = convertFrameToASCII(frameData, asciiResolutionForFrame, charHeight);
                     } else if (currentMode === 'zoom') {
                         // Match preview timing: 30 frames at currentFPS = cycle duration in seconds
                         const cycleDurationSeconds = 30 / currentFPS;
@@ -2047,13 +2916,13 @@ async function generateVideoFromVideo(videoPath, onProgress) {
                         const zoomCharHeight = Math.round(zoomCharWidth / currentAspectRatio);
                         asciiFrame = convertFrameToASCII(frameData, zoomCharWidth, zoomCharHeight);
                     } else if (currentMode === 'dither') {
-                        asciiFrame = convertFrameToASCIIDither(frameData, currentCharWidth, charHeight);
+                        asciiFrame = convertFrameToASCIIDither(frameData, asciiResolutionForFrame, charHeight);
                     } else if (currentMode === 'glitch') {
                         // Match preview timing by using effective frame count at currentFPS
                         const effectiveFrame = Math.floor(frameIndex * currentFPS / videoFPS);
-                        asciiFrame = convertFrameToASCIIGlitch(frameData, currentCharWidth, charHeight, effectiveFrame);
+                        asciiFrame = convertFrameToASCIIGlitch(frameData, asciiResolutionForFrame, charHeight, effectiveFrame);
                     } else {
-                        asciiFrame = convertFrameToASCII(frameData, currentCharWidth, charHeight);
+                        asciiFrame = convertFrameToASCII(frameData, asciiResolutionForFrame, charHeight);
                     }
                     
                     // Render ASCII frame
@@ -2064,6 +2933,16 @@ async function generateVideoFromVideo(videoPath, onProgress) {
                     const tempCtx = tempVideoCanvas.getContext('2d');
                     tempCtx.fillStyle = '#000000';
                     tempCtx.fillRect(0, 0, OUTPUT_WIDTH, outputHeight);
+                    
+                    // Store original effect values
+                    const origBrightness = brightness;
+                    const origContrast = contrast;
+                    const origOpacity = opacity;
+                    
+                    // Apply sound reactive ASCII effects
+                    brightness = asciiBrightnessForFrame;
+                    contrast = asciiContrastForFrame;
+                    opacity = asciiOpacityForFrame;
                     
                     if (currentMode === 'flag') {
                         // Match preview timing: 30 frames at currentFPS = cycle duration in seconds
@@ -2088,9 +2967,32 @@ async function generateVideoFromVideo(videoPath, onProgress) {
                         renderASCIIFrame(asciiFrame, tempVideoCanvas, fontSize, charHeight);
                     }
                     
+                    // Restore original effects
+                    brightness = origBrightness;
+                    contrast = origContrast;
+                    opacity = origOpacity;
+                    
                     // Render overlay image on top if enabled
                     if (overlayEnabled && overlayImageData) {
+                        // Store original overlay values
+                        const origOverlaySize = overlaySize;
+                        const origOverlayBrightness = overlayBrightness;
+                        const origOverlayContrast = overlayContrast;
+                        const origOverlayOpacity = overlayOpacity;
+                        
+                        // Apply sound reactive overlay effects
+                        overlaySize = overlaySizeForFrame;
+                        overlayBrightness = overlayBrightnessForFrame;
+                        overlayContrast = overlayContrastForFrame;
+                        overlayOpacity = overlayOpacityForFrame;
+                        
                         renderOverlayToCanvas(tempCtx, OUTPUT_WIDTH, outputHeight);
+                        
+                        // Restore original overlay values
+                        overlaySize = origOverlaySize;
+                        overlayBrightness = origOverlayBrightness;
+                        overlayContrast = origOverlayContrast;
+                        overlayOpacity = origOverlayOpacity;
                     }
                     
                     frames.push(tempCtx.getImageData(0, 0, OUTPUT_WIDTH, outputHeight));
@@ -2159,9 +3061,17 @@ async function generateVideo() {
             return;
         }
 
-        const duration = parseInt(document.getElementById('durationInput').value) || 5;
+        // Determine duration based on export mode
+        let duration;
+        if (exportFullAudio && audioBuffer) {
+            duration = audioBuffer.duration;
+            showStatus(`Generating ${duration.toFixed(1)}s video synced to audio...`, 'info');
+        } else {
+            duration = parseInt(document.getElementById('durationInput').value) || 5;
+        }
+        
         const framerate = 30;
-        const totalFrames = duration * framerate;
+        const totalFrames = Math.round(duration * framerate);
 
         updateProgress(0);
 
@@ -2189,7 +3099,87 @@ async function generateVideo() {
         let cachedASCIIFrame = null;
         let lastASCIIFrameIndex = -1;
         
+        // Pre-analyze audio if sound reactive is enabled
+        let audioLevelPerFrame = [];
+        if (soundReactiveEnabled && audioBuffer) {
+            const audioSampleRate = audioBuffer.sampleRate;
+            const audioLength = audioBuffer.length;
+            const framesPerAudioSample = audioLength / totalFrames;
+            
+            for (let i = 0; i < totalFrames; i++) {
+                const sampleIndex = Math.floor(i * framesPerAudioSample);
+                const endIndex = Math.min(sampleIndex + Math.floor(framesPerAudioSample), audioLength);
+                
+                let sum = 0;
+                const channelData = audioBuffer.getChannelData(0);
+                
+                for (let j = sampleIndex; j < endIndex; j++) {
+                    sum += Math.abs(channelData[j]);
+                }
+                
+                const average = (endIndex - sampleIndex > 0) ? sum / (endIndex - sampleIndex) : 0;
+                audioLevelPerFrame[i] = Math.min(1, average * 2); // Normalize
+            }
+        }
+        
         for (let i = 0; i < totalFrames; i++) {
+            // Get current audio level for this frame
+            let currentAudioLevelForFrame = 0;
+            if (soundReactiveEnabled && audioLevelPerFrame[i] !== undefined) {
+                currentAudioLevelForFrame = audioLevelPerFrame[i];
+            }
+            
+            // Calculate sound reactive effects for this frame
+            let asciiResolutionForFrame = currentCharWidth;
+            let asciiBrightnessForFrame = brightness;
+            let asciiContrastForFrame = contrast;
+            let asciiOpacityForFrame = opacity;
+            let asciiHueForFrame = hue;
+            let asciiSaturationForFrame = saturation;
+            let overlaySizeForFrame = overlaySize;
+            let overlayBrightnessForFrame = overlayBrightness;
+            let overlayContrastForFrame = overlayContrast;
+            let overlayOpacityForFrame = overlayOpacity;
+            let overlayXForFrame = overlayX;
+            let overlayYForFrame = overlayY;
+            
+            if (soundReactiveEnabled && asciiResolutionChange !== 0) {
+                asciiResolutionForFrame = Math.max(10, currentCharWidth + (asciiResolutionChange * currentAudioLevelForFrame * volumeSensitivity));
+            }
+            if (soundReactiveEnabled && asciiBrightnessChange !== 0) {
+                asciiBrightnessForFrame = brightness + (asciiBrightnessChange * currentAudioLevelForFrame * volumeSensitivity);
+            }
+            if (soundReactiveEnabled && asciiContrastChange !== 0) {
+                asciiContrastForFrame = Math.max(0, contrast + (asciiContrastChange * currentAudioLevelForFrame * volumeSensitivity));
+            }
+            if (soundReactiveEnabled && asciiOpacityChange !== 0) {
+                asciiOpacityForFrame = Math.max(0, Math.min(100, opacity + (asciiOpacityChange * currentAudioLevelForFrame * volumeSensitivity)));
+            }
+            if (soundReactiveEnabled && asciiHueShift !== 0) {
+                asciiHueForFrame = hue + (asciiHueShift * currentAudioLevelForFrame * volumeSensitivity);
+            }
+            if (soundReactiveEnabled && asciiSaturationChange !== 0) {
+                asciiSaturationForFrame = Math.max(0, saturation + (asciiSaturationChange * currentAudioLevelForFrame * volumeSensitivity));
+            }
+            if (soundReactiveEnabled && overlaySizeChange !== 0) {
+                overlaySizeForFrame = Math.max(50, overlaySize + (overlaySizeChange * currentAudioLevelForFrame * volumeSensitivity));
+            }
+            if (soundReactiveEnabled && overlayBrightnessChange !== 0) {
+                overlayBrightnessForFrame = overlayBrightness + (overlayBrightnessChange * currentAudioLevelForFrame * volumeSensitivity);
+            }
+            if (soundReactiveEnabled && overlayContrastChange !== 0) {
+                overlayContrastForFrame = Math.max(0, overlayContrast + (overlayContrastChange * currentAudioLevelForFrame * volumeSensitivity));
+            }
+            if (soundReactiveEnabled && overlayOpacityChange !== 0) {
+                overlayOpacityForFrame = Math.max(0, Math.min(100, overlayOpacity + (overlayOpacityChange * currentAudioLevelForFrame * volumeSensitivity)));
+            }
+            if (soundReactiveEnabled && overlayXChange !== 0) {
+                overlayXForFrame = overlayX + (overlayXChange * currentAudioLevelForFrame * volumeSensitivity / videoWidth * 100);
+            }
+            if (soundReactiveEnabled && overlayYChange !== 0) {
+                overlayYForFrame = overlayY + (overlayYChange * currentAudioLevelForFrame * volumeSensitivity / videoHeight * 100);
+            }
+            
             // Get ASCII frame for this mode
             let asciiFrame = null;
             let renderCharHeight = charHeight;
@@ -2198,7 +3188,7 @@ async function generateVideo() {
                 // Match preview timing: regenerate at currentFPS rate
                 const framesPerASCIIUpdate = Math.max(1, Math.round(framerate / currentFPS));
                 if (i % framesPerASCIIUpdate === 0) {
-                    asciiFrame = convertFrameToASCII(currentImageData, currentCharWidth, charHeight);
+                    asciiFrame = convertFrameToASCII(currentImageData, asciiResolutionForFrame, charHeight);
                     cachedASCIIFrame = asciiFrame;
                 } else {
                     asciiFrame = cachedASCIIFrame;
@@ -2218,7 +3208,7 @@ async function generateVideo() {
             } else if (currentMode === 'flag') {
                 // Flag mode: static ASCII with waving animation (loops continuously)
                 if (i === 0) {
-                    asciiFrame = convertFrameToASCII(currentImageData, currentCharWidth, charHeight);
+                    asciiFrame = convertFrameToASCII(currentImageData, asciiResolutionForFrame, charHeight);
                     cachedASCIIFrame = asciiFrame;
                 } else {
                     asciiFrame = cachedASCIIFrame;
@@ -2226,7 +3216,7 @@ async function generateVideo() {
             } else if (currentMode === 'dither') {
                 // Dither mode: static ASCII with ordered dithering pattern
                 if (i === 0) {
-                    asciiFrame = convertFrameToASCIIDither(currentImageData, currentCharWidth, charHeight);
+                    asciiFrame = convertFrameToASCIIDither(currentImageData, asciiResolutionForFrame, charHeight);
                     cachedASCIIFrame = asciiFrame;
                 } else {
                     asciiFrame = cachedASCIIFrame;
@@ -2234,7 +3224,7 @@ async function generateVideo() {
             } else if (currentMode === 'glitch') {
                 // Glitch mode: match preview timing by using effective frame count at currentFPS
                 const effectiveFrame = Math.floor(i * currentFPS / framerate);
-                asciiFrame = convertFrameToASCIIGlitch(currentImageData, currentCharWidth, charHeight, effectiveFrame);
+                asciiFrame = convertFrameToASCIIGlitch(currentImageData, asciiResolutionForFrame, charHeight, effectiveFrame);
             }
 
             // Render frame to temporary canvas
@@ -2245,6 +3235,20 @@ async function generateVideo() {
             const ctx = tempVideoCanvas.getContext('2d');
             ctx.fillStyle = '#000000';
             ctx.fillRect(0, 0, videoWidth, videoHeight);
+            
+            // Store original effect values
+            const origBrightness = brightness;
+            const origContrast = contrast;
+            const origOpacity = opacity;
+            const origHue = hue;
+            const origSaturation = saturation;
+            
+            // Apply sound reactive ASCII effects
+            brightness = asciiBrightnessForFrame;
+            contrast = asciiContrastForFrame;
+            opacity = asciiOpacityForFrame;
+            hue = asciiHueForFrame;
+            saturation = asciiSaturationForFrame;
             
             // Use flag rendering for flag mode, normal rendering for others
             if (currentMode === 'flag') {
@@ -2257,19 +3261,57 @@ async function generateVideo() {
                 renderASCIIFrame(asciiFrame, tempVideoCanvas, fontSize, renderCharHeight);
             }
             
+            // Restore original effects
+            brightness = origBrightness;
+            contrast = origContrast;
+            opacity = origOpacity;
+            hue = origHue;
+            saturation = origSaturation;
+            
             // Render overlay image on top if enabled
             if (overlayEnabled && overlayImageData) {
+                // Store original overlay values
+                const origOverlaySize = overlaySize;
+                const origOverlayBrightness = overlayBrightness;
+                const origOverlayContrast = overlayContrast;
+                const origOverlayOpacity = overlayOpacity;
+                const origOverlayX = overlayX;
+                const origOverlayY = overlayY;
+                
+                // Apply sound reactive overlay effects
+                overlaySize = overlaySizeForFrame;
+                overlayBrightness = overlayBrightnessForFrame;
+                overlayContrast = overlayContrastForFrame;
+                overlayOpacity = overlayOpacityForFrame;
+                overlayX = overlayXForFrame;
+                overlayY = overlayYForFrame;
+                
                 renderOverlayToCanvas(ctx, videoWidth, videoHeight);
+                
+                // Restore original overlay values
+                overlaySize = origOverlaySize;
+                overlayBrightness = origOverlayBrightness;
+                overlayContrast = origOverlayContrast;
+                overlayOpacity = origOverlayOpacity;
+                overlayX = origOverlayX;
+                overlayY = origOverlayY;
             }
 
             frames.push(ctx.getImageData(0, 0, videoWidth, videoHeight));
             updateProgress(Math.round((i / totalFrames) * 30)); // 0-30% for frame generation
         }
 
+        // Prepare audio for export if needed
+        let audioData = null;
+        if (exportFullAudio && audioFile) {
+            const audioArrayBuffer = await audioFile.arrayBuffer();
+            audioData = new Uint8Array(audioArrayBuffer);
+        }
+
         // Encode to MP4
         const videoBlob = await encodeToMP4(frames, duration, (percent) => {
             updateProgress(30 + Math.round(percent * 0.7)); // 30-100% for encoding
-        });
+        }, audioData);
 
         // Save video for download
         window.generatedVideoBlob = videoBlob;
@@ -2299,7 +3341,7 @@ async function generateVideo() {
 /**
  * Encode frames to MP4 video using FFmpeg
  */
-async function encodeToMP4(frames, duration, onProgress) {
+async function encodeToMP4(frames, duration, onProgress, audioData = null) {
     if (!ffmpegReady || !ffmpeg) {
         throw new Error('FFmpeg not ready');
     }
@@ -2391,18 +3433,48 @@ async function encodeToMP4(frames, duration, onProgress) {
         }
     }
 
+    // Write audio file if provided
+    let hasAudio = false;
+    if (audioData) {
+        try {
+            writeFile('audio.mp3', audioData);
+            hasAudio = true;
+            console.log('Audio file written to FFmpeg filesystem');
+        } catch (error) {
+            console.error('Failed to write audio file:', error);
+        }
+    }
+
     // Run FFmpeg to create video
     try {
-        await ffmpeg.run(
-            '-framerate', String(framerate),
-            '-pattern_type', 'glob',
-            '-i', 'frame_*.ppm',
-            '-c:v', 'libx264',
-            '-pix_fmt', 'yuv420p',
-            '-preset', 'medium',
-            '-crf', '23',
-            'output.mp4'
-        );
+        if (hasAudio) {
+            // Include audio in the output
+            await ffmpeg.run(
+                '-framerate', String(framerate),
+                '-pattern_type', 'glob',
+                '-i', 'frame_*.ppm',
+                '-i', 'audio.mp3',
+                '-c:v', 'libx264',
+                '-c:a', 'aac',
+                '-b:a', '192k',
+                '-pix_fmt', 'yuv420p',
+                '-preset', 'medium',
+                '-crf', '23',
+                '-shortest',
+                'output.mp4'
+            );
+        } else {
+            await ffmpeg.run(
+                '-framerate', String(framerate),
+                '-pattern_type', 'glob',
+                '-i', 'frame_*.ppm',
+                '-c:v', 'libx264',
+                '-pix_fmt', 'yuv420p',
+                '-preset', 'medium',
+                '-crf', '23',
+                'output.mp4'
+            );
+        }
     } catch (error) {
         console.error('FFmpeg run error:', error);
         throw new Error(`FFmpeg encoding failed: ${error.message}`);
@@ -2421,6 +3493,9 @@ async function encodeToMP4(frames, duration, onProgress) {
 
     // Clean up FFmpeg filesystem
     unlinkFile('output.mp4');
+    if (hasAudio) {
+        unlinkFile('audio.mp3');
+    }
     for (let i = 0; i < totalFrames; i++) {
         const fileName = `frame_${String(i).padStart(6, '0')}.ppm`;
         unlinkFile(fileName);
