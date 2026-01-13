@@ -19,9 +19,11 @@ let fixedFontSizeEnabled = false;
 let fixedFontSize = 9;
 let zoomMinChars = 10;
 let zoomMaxChars = 300;
+let zoomCycleDuration = 3; // seconds
 let customChars = '';
 let flagDistance = 20;
 let flagSpeed = 1;
+let flagCycleDuration = 3; // seconds
 let ditherSensitivity = 0.3;
 let ditherContrast = 1;
 let glitchIntensity = 3;
@@ -285,8 +287,10 @@ function setupEventListeners() {
     const fpsSlider = document.getElementById('fpsSlider');
     const zoomMinSlider = document.getElementById('zoomMinSlider');
     const zoomMaxSlider = document.getElementById('zoomMaxSlider');
+    const zoomCycleSlider = document.getElementById('zoomCycleSlider');
     const flagDistanceSlider = document.getElementById('flagDistanceSlider');
     const flagSpeedSlider = document.getElementById('flagSpeedSlider');
+    const flagCycleSlider = document.getElementById('flagCycleSlider');
     const ditherSensitivitySlider = document.getElementById('ditherSensitivitySlider');
     const ditherContrastSlider = document.getElementById('ditherContrastSlider');
     const glitchIntensitySlider = document.getElementById('glitchIntensitySlider');
@@ -403,6 +407,17 @@ function setupEventListeners() {
         }
     });
 
+    // Zoom cycle duration slider
+    if (zoomCycleSlider) {
+        zoomCycleSlider.addEventListener('input', (e) => {
+            zoomCycleDuration = parseFloat(e.target.value);
+            document.getElementById('zoomCycleValue').textContent = zoomCycleDuration;
+            if (currentImageData && currentMode === 'zoom') {
+                generatePreview();
+            }
+        });
+    }
+
     // Flag distance slider
     flagDistanceSlider.addEventListener('input', (e) => {
         flagDistance = parseInt(e.target.value);
@@ -420,6 +435,17 @@ function setupEventListeners() {
             generatePreview();
         }
     });
+
+    // Flag cycle duration slider
+    if (flagCycleSlider) {
+        flagCycleSlider.addEventListener('input', (e) => {
+            flagCycleDuration = parseFloat(e.target.value);
+            document.getElementById('flagCycleValue').textContent = flagCycleDuration;
+            if (currentImageData && currentMode === 'flag') {
+                generatePreview();
+            }
+        });
+    }
 
     // Dither sensitivity slider
     ditherSensitivitySlider.addEventListener('input', (e) => {
@@ -1142,10 +1168,12 @@ function updateModeSettings(mode) {
     // Show/hide zoom sliders
     setDisplay('zoomSettings', mode === 'zoom');
     setDisplay('zoomMaxSettings', mode === 'zoom');
+    setDisplay('zoomCycleSettings', mode === 'zoom');
     
     // Show/hide flag sliders
     setDisplay('flagDistanceSettings', mode === 'flag');
     setDisplay('flagSpeedSettings', mode === 'flag');
+    setDisplay('flagCycleSettings', mode === 'flag');
     
     // Show/hide dither slider
     setDisplay('ditherSensitivitySettings', mode === 'dither');
@@ -2351,7 +2379,7 @@ function generatePreview() {
             }
             asciiFrame = shiftASCIIFrame(baseASCIIFrame, frameCount % currentCharWidthForThisFrame);
         } else if (currentMode === 'zoom') {
-            const cycleDurationFrames = currentFPS * 3; // 3 second cycle
+            const cycleDurationFrames = currentFPS * zoomCycleDuration;
             const progress = (frameCount % cycleDurationFrames) / cycleDurationFrames;
             const zoomCharWidth = getZoomCharWidth(progress);
             renderCharHeight = Math.round(zoomCharWidth / currentAspectRatio);
@@ -3072,8 +3100,8 @@ async function generateVideoFromVideo(videoPath, onProgress) {
                     } else if (currentMode === 'scroll') {
                         asciiFrame = convertFrameToASCII(frameData, asciiResolutionForFrame, charHeight);
                     } else if (currentMode === 'zoom') {
-                        // Match preview timing: 3 second cycle
-                        const cycleDurationSeconds = 3;
+                        // Match preview timing: use zoomCycleDuration
+                        const cycleDurationSeconds = zoomCycleDuration;
                         const timeInVideo = frameIndex / videoFPS;
                         const progress = (timeInVideo % cycleDurationSeconds) / cycleDurationSeconds;
                         const zoomCharWidth = getZoomCharWidth(progress);
@@ -3120,8 +3148,8 @@ async function generateVideoFromVideo(videoPath, onProgress) {
                         const shiftedFrame = shiftASCIIFrame(asciiFrame, effectiveFrame % currentCharWidth);
                         renderASCIIFrame(shiftedFrame, tempVideoCanvas, fontSize, charHeight);
                     } else if (currentMode === 'zoom') {
-                        // Match preview timing: 30 frames at currentFPS = cycle duration in seconds
-                        const cycleDurationSeconds = 30 / currentFPS;
+                        // Match preview timing: use zoomCycleDuration
+                        const cycleDurationSeconds = zoomCycleDuration;
                         const timeInVideo = frameIndex / videoFPS;
                         const progress = (timeInVideo % cycleDurationSeconds) / cycleDurationSeconds;
                         const zoomCharWidth = getZoomCharWidth(progress);
@@ -3361,7 +3389,7 @@ async function generateVideoFromVideoChunked(videoPath, onProgress) {
                         } else if (currentMode === 'scroll') {
                             asciiFrame = convertFrameToASCII(frameData, asciiResolutionForFrame, charHeight);
                         } else if (currentMode === 'zoom') {
-                            const cycleDurationSeconds = 3;
+                            const cycleDurationSeconds = zoomCycleDuration;
                             const timeInVid = frameIndex / videoFPS;
                             const progress = (timeInVid % cycleDurationSeconds) / cycleDurationSeconds;
                             const zoomCharWidth = getZoomCharWidth(progress);
@@ -3405,7 +3433,8 @@ async function generateVideoFromVideoChunked(videoPath, onProgress) {
                             const shiftedFrame = shiftASCIIFrame(asciiFrame, effectiveFrame % currentCharWidth);
                             renderASCIIFrame(shiftedFrame, tempVideoCanvas, fontSize, charHeight);
                         } else if (currentMode === 'zoom') {
-                            const cycleDurationSeconds = 30 / currentFPS;
+                            // Match preview timing: use zoomCycleDuration
+                            const cycleDurationSeconds = zoomCycleDuration;
                             const timeInVid = frameIndex / videoFPS;
                             const progress = (timeInVid % cycleDurationSeconds) / cycleDurationSeconds;
                             const zoomCharWidth = getZoomCharWidth(progress);
@@ -3616,8 +3645,8 @@ function generateSingleFrame(frameIndex, params) {
         const effectiveFrame = Math.floor(frameIndex * currentFPS / framerate);
         asciiFrame = shiftASCIIFrame(baseASCIIFrame, effectiveFrame % currentCharWidth);
     } else if (currentMode === 'zoom') {
-        // Match preview timing: 30 frames at currentFPS = cycle duration in seconds
-        const cycleDurationSeconds = 30 / currentFPS;
+        // Match preview timing: use zoomCycleDuration
+        const cycleDurationSeconds = zoomCycleDuration;
         const timeInVideo = frameIndex / framerate; // Current time in seconds
         const progress = (timeInVideo % cycleDurationSeconds) / cycleDurationSeconds;
         const zoomCharWidth = getZoomCharWidth(progress);
