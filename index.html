@@ -39,6 +39,9 @@
                         <option value="original">Original (Static)</option>
                         <option value="scroll">Scroll (Flowing)</option>
                         <option value="zoom">Zoom (Resolution)</option>
+                        <option value="flag">Flag (Waving)</option>
+                        <option value="dither">Dither (Pattern)</option>
+                        <option value="glitch">Glitch (Displacement)</option>
                     </select>
                 </div>
                 <div class="settings-group">
@@ -113,6 +116,63 @@
                         class="input-slider"
                     >
                 </div>
+                <div class="settings-group" id="flagDistanceSettings" style="display: none;">
+                    <label for="flagDistanceSlider">Wave Distance: <span id="flagDistanceValue">20</span>px</label>
+                    <input 
+                        type="range" 
+                        id="flagDistanceSlider" 
+                        min="1" 
+                        max="100" 
+                        value="20" 
+                        class="input-slider"
+                    >
+                </div>
+                <div class="settings-group" id="flagSpeedSettings" style="display: none;">
+                    <label for="flagSpeedSlider">Wave Speed: <span id="flagSpeedValue">1</span></label>
+                    <input 
+                        type="range" 
+                        id="flagSpeedSlider" 
+                        min="1" 
+                        max="30" 
+                        value="1" 
+                        class="input-slider"
+                    >
+                </div>
+                <div class="settings-group" id="ditherSensitivitySettings" style="display: none;">
+                    <label for="ditherSensitivitySlider">Dither Sensitivity: <span id="ditherSensitivityValue">0.3</span></label>
+                    <input 
+                        type="range" 
+                        id="ditherSensitivitySlider" 
+                        min="0.05" 
+                        max="10" 
+                        step="0.1"
+                        value="0.3" 
+                        class="input-slider"
+                    >
+                </div>
+                <div class="settings-group" id="ditherContrastSettings" style="display: none;">
+                    <label for="ditherContrastSlider">Dither Contrast: <span id="ditherContrastValue">1</span></label>
+                    <input 
+                        type="range" 
+                        id="ditherContrastSlider" 
+                        min="0.1" 
+                        max="10" 
+                        step="0.1"
+                        value="1" 
+                        class="input-slider"
+                    >
+                </div>
+                <div class="settings-group" id="glitchIntensitySettings" style="display: none;">
+                    <label for="glitchIntensitySlider">Glitch Intensity: <span id="glitchIntensityValue">3</span></label>
+                    <input 
+                        type="range" 
+                        id="glitchIntensitySlider" 
+                        min="1" 
+                        max="20" 
+                        value="3" 
+                        class="input-slider"
+                    >
+                </div>
                 <div class="settings-group">
                     <label for="durationInput">Video Duration (seconds):</label>
                     <input 
@@ -126,11 +186,175 @@
                 </div>
             </section>
 
+            <!-- Effects Section -->
+            <section class="settings-section">
+                <h3 style="margin-top: 0;">Effects</h3>
+                <div class="settings-group">
+                    <label for="vignetteSlider">Vignette: <span id="vignetteValue">0</span></label>
+                    <input 
+                        type="range" 
+                        id="vignetteSlider" 
+                        min="0" 
+                        max="1" 
+                        step="0.05"
+                        value="0" 
+                        class="input-slider"
+                    >
+                </div>
+                <div class="settings-group">
+                    <label for="brightnessSlider">Brightness: <span id="brightnessValue">0</span></label>
+                    <input 
+                        type="range" 
+                        id="brightnessSlider" 
+                        min="-100" 
+                        max="100" 
+                        value="0" 
+                        class="input-slider"
+                    >
+                </div>
+                <div class="settings-group">
+                    <label for="contrastSlider">Contrast: <span id="contrastValue">100</span>%</label>
+                    <input 
+                        type="range" 
+                        id="contrastSlider" 
+                        min="0" 
+                        max="200" 
+                        value="100" 
+                        class="input-slider"
+                    >
+                </div>
+                <div class="settings-group">
+                    <label for="saturationSlider">Saturation: <span id="saturationValue">100</span>%</label>
+                    <input 
+                        type="range" 
+                        id="saturationSlider" 
+                        min="0" 
+                        max="200" 
+                        value="100" 
+                        class="input-slider"
+                    >
+                </div>
+                <div class="settings-group">
+                    <label for="hueSlider">Hue Shift: <span id="hueValue">0</span>°</label>
+                    <input 
+                        type="range" 
+                        id="hueSlider" 
+                        min="0" 
+                        max="360" 
+                        value="0" 
+                        class="input-slider"
+                    >
+                </div>
+                <div class="settings-group">
+                    <label for="grayscaleSlider">Grayscale: <span id="grayscaleValue">0</span>%</label>
+                    <input 
+                        type="range" 
+                        id="grayscaleSlider" 
+                        min="0" 
+                        max="100" 
+                        value="0" 
+                        class="input-slider"
+                    >
+                </div>
+                <div class="settings-group">
+                    <label for="invertSlider">Invert: <span id="invertValue">0</span>%</label>
+                    <input 
+                        type="range" 
+                        id="invertSlider" 
+                        min="0" 
+                        max="100" 
+                        value="0" 
+                        class="input-slider"
+                    >
+                </div>
+                <div class="settings-group">
+                    <label for="blurSlider">Blur: <span id="blurValue">0</span>px</label>
+                    <input 
+                        type="range" 
+                        id="blurSlider" 
+                        min="0" 
+                        max="20" 
+                        step="0.5"
+                        value="0" 
+                        class="input-slider"
+                    >
+                </div>
+                <div class="settings-group">
+                    <label for="sepiaSlider">Sepia: <span id="sepiaValue">0</span>%</label>
+                    <input 
+                        type="range" 
+                        id="sepiaSlider" 
+                        min="0" 
+                        max="100" 
+                        value="0" 
+                        class="input-slider"
+                    >
+                </div>
+                <div class="settings-group">
+                    <label for="opacitySlider">Opacity: <span id="opacityValue">100</span>%</label>
+                    <input 
+                        type="range" 
+                        id="opacitySlider" 
+                        min="10" 
+                        max="100" 
+                        value="100" 
+                        class="input-slider"
+                    >
+                </div>
+                <div class="settings-group">
+                    <label for="glowSlider">Glow: <span id="glowValue">0</span></label>
+                    <input 
+                        type="range" 
+                        id="glowSlider" 
+                        min="0" 
+                        max="20" 
+                        step="0.5"
+                        value="0" 
+                        class="input-slider"
+                    >
+                </div>
+                <div class="settings-group">
+                    <label for="brightnessBoostSlider">Brightness Boost: <span id="brightnessBoostValue">0</span></label>
+                    <input 
+                        type="range" 
+                        id="brightnessBoostSlider" 
+                        min="0" 
+                        max="100" 
+                        value="0" 
+                        class="input-slider"
+                    >
+                </div>
+                <div class="settings-group">
+                    <label for="warmthSlider">Warmth: <span id="warmthValue">0</span></label>
+                    <input 
+                        type="range" 
+                        id="warmthSlider" 
+                        min="-50" 
+                        max="50" 
+                        value="0" 
+                        class="input-slider"
+                    >
+                </div>
+                <div class="settings-group">
+                    <label for="shadowSlider">Shadow Depth: <span id="shadowValue">0</span></label>
+                    <input 
+                        type="range" 
+                        id="shadowSlider" 
+                        min="0" 
+                        max="20" 
+                        step="0.5"
+                        value="0" 
+                        class="input-slider"
+                    >
+                </div>
+            </section>
+
             <!-- Canvas Preview Section -->
             <section class="canvas-section">
                 <h2>Preview</h2>
-                <div class="canvas-container">
+                <div class="canvas-container" id="canvasContainer">
                     <canvas id="outputCanvas" width="1080" height="1920"></canvas>
+                    <div id="effectsOverlay" class="effects-overlay"></div>
                     <div id="canvasPlaceholder" class="canvas-placeholder">
                         Upload an image to generate ASCII art preview
                     </div>
@@ -168,7 +392,7 @@
     <canvas id="tempCanvas" style="display: none;"></canvas>
 
     <!-- FFmpeg.wasm Library -->
-    <script async src="https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.11.6/dist/ffmpeg.min.js"></script>
+    <script async src="https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg/dist/ffmpeg.min.js"></script>
     
     <!-- Main Application Script -->
     <script src="script.js"></script>

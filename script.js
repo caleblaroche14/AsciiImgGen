@@ -16,6 +16,27 @@ let currentCharWidth = 200;
 let zoomMinChars = 10;
 let zoomMaxChars = 300;
 let customChars = '';
+let flagDistance = 20;
+let flagSpeed = 1;
+let ditherSensitivity = 0.3;
+let ditherContrast = 1;
+let glitchIntensity = 3;
+let vignette = 0;
+let brightness = 0;
+let contrast = 100;
+let saturation = 100;
+let hue = 0;
+let grayscale = 0;
+let invert = 0;
+let blur = 0;
+let sepia = 0;
+let opacity = 100;
+let glow = 0;
+let brightnessBoost = 0;
+let warmth = 0;
+let shadow = 0;
+let ffmpegRetryCount = 0;
+const MAX_FFMPEG_RETRIES = 5;
 
 // Character mapping for brightness levels - array of arrays for variation
 const CHARACTER_MAP = [
@@ -27,6 +48,14 @@ const CHARACTER_MAP = [
     ['*', 'x', 'X', '+', 'o'],                          // 62.5-75%
     ['#', '@', '%', '&', 'W', 'M', 'O'],               // 75-87.5%
     ['#', '@', '%', '&', 'W', 'M', 'B', '$', 'D']      // 87.5-100% (darkest)
+];
+
+// Bayer matrix for ordered dithering (4x4 pattern)
+const BAYER_MATRIX_4x4 = [
+    [0, 8, 2, 10],
+    [12, 4, 14, 6],
+    [3, 11, 1, 9],
+    [15, 7, 13, 5]
 ];
 
 const CHAR_WIDTH = 200;
@@ -48,24 +77,53 @@ document.addEventListener('DOMContentLoaded', () => {
  * Initialize FFmpeg instance
  */
 async function initializeFFmpeg() {
-    // Wait for FFmpeg to be available globally
-    if (typeof FFmpeg === 'undefined') {
-        console.log('Waiting for FFmpeg.wasm to load...');
-        return setTimeout(initializeFFmpeg, 100);
-    }
-
-    FFmpegModule = FFmpeg;
-    const FFmpegClass = FFmpeg.FFmpeg;
-    
-    ffmpeg = new FFmpegClass();
-    
     try {
+        // Wait for FFmpeg to be available in global scope
+        if (typeof FFmpeg === 'undefined') {
+            console.log('Waiting for FFmpeg.wasm to load...');
+            return setTimeout(initializeFFmpeg, 100);
+        }
+
+        const FFmpegClass = FFmpeg.FFmpeg;
+        if (!FFmpegClass && FFmpeg.createFFmpeg) {
+            // Older API: use createFFmpeg
+            console.log('Using legacy FFmpeg API with createFFmpeg');
+            ffmpeg = FFmpeg.createFFmpeg({ log: true });
+        } else if (FFmpegClass) {
+            // Newer API: use FFmpeg class
+            ffmpeg = new FFmpegClass();
+        } else {
+            console.log('No valid FFmpeg API found');
+            return setTimeout(initializeFFmpeg, 100);
+        }
+        
+        FFmpegModule = FFmpeg;
+        
+        console.log('Loading FFmpeg WASM...');
         await ffmpeg.load();
+        
         ffmpegReady = true;
         console.log('FFmpeg.wasm loaded successfully');
     } catch (error) {
-        console.error('Failed to load FFmpeg:', error);
-        showStatus('Error: Failed to load FFmpeg. Please refresh the page.', 'error');
+        const errorMsg = error.message || String(error);
+        
+        // SharedArrayBuffer error requires special server setup
+        if (errorMsg.includes('SharedArrayBuffer')) {
+            console.error('SharedArrayBuffer not available - requires CORS headers');
+            console.log('To fix: Run a local server with proper headers or use a different approach');
+            showStatus('Video generation requires running with a proper HTTP server (not file://).', 'error');
+            return; // Don't retry
+        }
+        
+        ffmpegRetryCount++;
+        if (ffmpegRetryCount >= MAX_FFMPEG_RETRIES) {
+            console.error('FFmpeg failed to load after', MAX_FFMPEG_RETRIES, 'attempts');
+            showStatus('Error: FFmpeg failed to load. Please try refreshing the page.', 'error');
+            return;
+        }
+        
+        console.error('Failed to load FFmpeg (attempt', ffmpegRetryCount, '):', error);
+        return setTimeout(initializeFFmpeg, 1000);
     }
 }
 
@@ -83,6 +141,25 @@ function setupEventListeners() {
     const fpsSlider = document.getElementById('fpsSlider');
     const zoomMinSlider = document.getElementById('zoomMinSlider');
     const zoomMaxSlider = document.getElementById('zoomMaxSlider');
+    const flagDistanceSlider = document.getElementById('flagDistanceSlider');
+    const flagSpeedSlider = document.getElementById('flagSpeedSlider');
+    const ditherSensitivitySlider = document.getElementById('ditherSensitivitySlider');
+    const ditherContrastSlider = document.getElementById('ditherContrastSlider');
+    const glitchIntensitySlider = document.getElementById('glitchIntensitySlider');
+    const vignetteSlider = document.getElementById('vignetteSlider');
+    const brightnessSlider = document.getElementById('brightnessSlider');
+    const contrastSlider = document.getElementById('contrastSlider');
+    const saturationSlider = document.getElementById('saturationSlider');
+    const hueSlider = document.getElementById('hueSlider');
+    const grayscaleSlider = document.getElementById('grayscaleSlider');
+    const invertSlider = document.getElementById('invertSlider');
+    const blurSlider = document.getElementById('blurSlider');
+    const sepiaSlider = document.getElementById('sepiaSlider');
+    const opacitySlider = document.getElementById('opacitySlider');
+    const glowSlider = document.getElementById('glowSlider');
+    const brightnessBoostSlider = document.getElementById('brightnessBoostSlider');
+    const warmthSlider = document.getElementById('warmthSlider');
+    const shadowSlider = document.getElementById('shadowSlider');
     const customCharsInput = document.getElementById('customCharsInput');
 
     // File input handling
@@ -101,6 +178,22 @@ function setupEventListeners() {
             currentMode === 'zoom' ? 'flex' : 'none';
         document.getElementById('zoomMaxSettings').style.display = 
             currentMode === 'zoom' ? 'flex' : 'none';
+        
+        // Show/hide flag sliders
+        document.getElementById('flagDistanceSettings').style.display = 
+            currentMode === 'flag' ? 'flex' : 'none';
+        document.getElementById('flagSpeedSettings').style.display = 
+            currentMode === 'flag' ? 'flex' : 'none';
+        
+        // Show/hide dither slider
+        document.getElementById('ditherSensitivitySettings').style.display = 
+            currentMode === 'dither' ? 'flex' : 'none';
+        document.getElementById('ditherContrastSettings').style.display = 
+            currentMode === 'dither' ? 'flex' : 'none';
+        
+        // Show/hide glitch slider
+        document.getElementById('glitchIntensitySettings').style.display = 
+            currentMode === 'glitch' ? 'flex' : 'none';
         
         if (currentImageData) {
             generatePreview();
@@ -147,6 +240,177 @@ function setupEventListeners() {
         zoomMaxChars = parseInt(e.target.value);
         document.getElementById('zoomMaxValue').textContent = zoomMaxChars;
         if (currentImageData && currentMode === 'zoom') {
+            generatePreview();
+        }
+    });
+
+    // Flag distance slider
+    flagDistanceSlider.addEventListener('input', (e) => {
+        flagDistance = parseInt(e.target.value);
+        document.getElementById('flagDistanceValue').textContent = flagDistance;
+        if (currentImageData && currentMode === 'flag') {
+            generatePreview();
+        }
+    });
+
+    // Flag speed slider
+    flagSpeedSlider.addEventListener('input', (e) => {
+        flagSpeed = parseInt(e.target.value);
+        document.getElementById('flagSpeedValue').textContent = flagSpeed;
+        if (currentImageData && currentMode === 'flag') {
+            generatePreview();
+        }
+    });
+
+    // Dither sensitivity slider
+    ditherSensitivitySlider.addEventListener('input', (e) => {
+        ditherSensitivity = parseFloat(e.target.value);
+        document.getElementById('ditherSensitivityValue').textContent = ditherSensitivity.toFixed(2);
+        if (currentImageData && currentMode === 'dither') {
+            generatePreview();
+        }
+    });
+
+    // Dither contrast slider
+    ditherContrastSlider.addEventListener('input', (e) => {
+        ditherContrast = parseFloat(e.target.value);
+        document.getElementById('ditherContrastValue').textContent = ditherContrast.toFixed(1);
+        if (currentImageData && currentMode === 'dither') {
+            generatePreview();
+        }
+    });
+
+    // Glitch intensity slider
+    glitchIntensitySlider.addEventListener('input', (e) => {
+        glitchIntensity = parseInt(e.target.value);
+        document.getElementById('glitchIntensityValue').textContent = glitchIntensity;
+        if (currentImageData && currentMode === 'glitch') {
+            generatePreview();
+        }
+    });
+
+    // Vignette effect
+    vignetteSlider.addEventListener('input', (e) => {
+        vignette = parseFloat(e.target.value);
+        document.getElementById('vignetteValue').textContent = vignette.toFixed(2);
+        if (currentImageData) {
+            generatePreview();
+        }
+    });
+
+    // Brightness effect
+    brightnessSlider.addEventListener('input', (e) => {
+        brightness = parseInt(e.target.value);
+        document.getElementById('brightnessValue').textContent = brightness;
+        if (currentImageData) {
+            generatePreview();
+        }
+    });
+
+    // Contrast effect
+    contrastSlider.addEventListener('input', (e) => {
+        contrast = parseInt(e.target.value);
+        document.getElementById('contrastValue').textContent = contrast;
+        if (currentImageData) {
+            generatePreview();
+        }
+    });
+
+    // Saturation effect
+    saturationSlider.addEventListener('input', (e) => {
+        saturation = parseInt(e.target.value);
+        document.getElementById('saturationValue').textContent = saturation;
+        if (currentImageData) {
+            generatePreview();
+        }
+    });
+
+    // Hue shift effect
+    hueSlider.addEventListener('input', (e) => {
+        hue = parseInt(e.target.value);
+        document.getElementById('hueValue').textContent = hue;
+        if (currentImageData) {
+            generatePreview();
+        }
+    });
+
+    // Grayscale effect
+    grayscaleSlider.addEventListener('input', (e) => {
+        grayscale = parseInt(e.target.value);
+        document.getElementById('grayscaleValue').textContent = grayscale;
+        if (currentImageData) {
+            generatePreview();
+        }
+    });
+
+    // Invert effect
+    invertSlider.addEventListener('input', (e) => {
+        invert = parseInt(e.target.value);
+        document.getElementById('invertValue').textContent = invert;
+        if (currentImageData) {
+            generatePreview();
+        }
+    });
+
+    // Blur effect
+    blurSlider.addEventListener('input', (e) => {
+        blur = parseFloat(e.target.value);
+        document.getElementById('blurValue').textContent = blur.toFixed(1);
+        if (currentImageData) {
+            generatePreview();
+        }
+    });
+
+    // Sepia effect
+    sepiaSlider.addEventListener('input', (e) => {
+        sepia = parseInt(e.target.value);
+        document.getElementById('sepiaValue').textContent = sepia;
+        if (currentImageData) {
+            generatePreview();
+        }
+    });
+
+    // Opacity effect
+    opacitySlider.addEventListener('input', (e) => {
+        opacity = parseInt(e.target.value);
+        document.getElementById('opacityValue').textContent = opacity;
+        if (currentImageData) {
+            generatePreview();
+        }
+    });
+
+    // Glow effect
+    glowSlider.addEventListener('input', (e) => {
+        glow = parseFloat(e.target.value);
+        document.getElementById('glowValue').textContent = glow.toFixed(1);
+        if (currentImageData) {
+            generatePreview();
+        }
+    });
+
+    // Brightness boost effect
+    brightnessBoostSlider.addEventListener('input', (e) => {
+        brightnessBoost = parseInt(e.target.value);
+        document.getElementById('brightnessBoostValue').textContent = brightnessBoost;
+        if (currentImageData) {
+            generatePreview();
+        }
+    });
+
+    // Warmth effect
+    warmthSlider.addEventListener('input', (e) => {
+        warmth = parseInt(e.target.value);
+        document.getElementById('warmthValue').textContent = warmth;
+        if (currentImageData) {
+            generatePreview();
+        }
+    });
+
+    // Shadow effect
+    shadowSlider.addEventListener('input', (e) => {
+        shadow = parseFloat(e.target.value);
+        document.getElementById('shadowValue').textContent = shadow.toFixed(1);
+        if (currentImageData) {
             generatePreview();
         }
     });
@@ -323,6 +587,19 @@ function generatePreview() {
             const zoomCharWidth = getZoomCharWidth(progress);
             renderCharHeight = Math.round(zoomCharWidth / currentAspectRatio);
             asciiFrame = convertFrameToASCII(currentImageData, zoomCharWidth, renderCharHeight);
+        } else if (currentMode === 'flag') {
+            // Flag mode: static ASCII with waving animation (loops continuously)
+            asciiFrame = convertFrameToASCII(currentImageData, currentCharWidth, charHeight);
+            const flagProgress = (frameCount % 30) / 30; // Cycle every 30 frames, loops continuously
+            renderASCIIFrameWithFlag(asciiFrame, outputCanvas, fontSize, renderCharHeight, flagProgress);
+            frameCount++;
+            return; // Skip normal render, handled by renderASCIIFrameWithFlag
+        } else if (currentMode === 'dither') {
+            // Dither mode: static ASCII with ordered dithering pattern
+            asciiFrame = convertFrameToASCIIDither(currentImageData, currentCharWidth, charHeight);
+        } else if (currentMode === 'glitch') {
+            // Glitch mode: animated random displacement of chunks
+            asciiFrame = convertFrameToASCIIGlitch(currentImageData, currentCharWidth, charHeight, frameCount);
         }
 
         // Render ASCII to canvas
@@ -472,6 +749,121 @@ function convertFrameToASCII(imageData, charWidth, charHeight) {
     return { characters, colors };
 }
 
+/**
+ * Convert image to ASCII using ordered dithering (Bayer matrix)
+ */
+function convertFrameToASCIIDither(imageData, charWidth, charHeight) {
+    const imgWidth = imageData.width;
+    const imgHeight = imageData.height;
+
+    const characters = [];
+    const colors = [];
+
+    // Calculate pixel region size
+    const regionWidth = imgWidth / charWidth;
+    const regionHeight = imgHeight / charHeight;
+
+    for (let charY = 0; charY < charHeight; charY++) {
+        characters[charY] = [];
+        colors[charY] = [];
+
+        for (let charX = 0; charX < charWidth; charX++) {
+            const pixelX = Math.floor(charX * regionWidth);
+            const pixelY = Math.floor(charY * regionHeight);
+
+            const sampled = sampleRegion(
+                imageData,
+                pixelX,
+                pixelY,
+                Math.ceil(regionWidth),
+                Math.ceil(regionHeight)
+            );
+
+            // Apply Bayer matrix dithering with threshold-based approach
+            const bayerX = charX % 4;
+            const bayerY = charY % 4;
+            const ditherThreshold = BAYER_MATRIX_4x4[bayerY][bayerX] / 16; // Normalize to 0-1
+            
+            // Use threshold-based dithering with sensitivity and contrast control
+            // Sensitivity controls pattern strength, Contrast controls brightness spread
+            const adjustedThreshold = ditherThreshold * ditherSensitivity;
+            const contrastAdjustedBrightness = (sampled.brightness - 0.5) * ditherContrast + 0.5;
+            const ditheredBrightness = contrastAdjustedBrightness > adjustedThreshold ? 
+                Math.min(1, contrastAdjustedBrightness + ditherSensitivity * 0.5) : 
+                Math.max(0, contrastAdjustedBrightness - ditherSensitivity * 0.5);
+            
+            characters[charY][charX] = pixelToCharacter(ditheredBrightness);
+            colors[charY][charX] = {
+                r: sampled.r,
+                g: sampled.g,
+                b: sampled.b
+            };
+        }
+    }
+
+    return { characters, colors };
+}
+
+/**
+ * Convert image to ASCII with glitch effect (random chunk displacement)
+ */
+function convertFrameToASCIIGlitch(imageData, charWidth, charHeight, frameCount) {
+    const imgWidth = imageData.width;
+    const imgHeight = imageData.height;
+
+    const characters = [];
+    const colors = [];
+
+    // Calculate pixel region size
+    const regionWidth = imgWidth / charWidth;
+    const regionHeight = imgHeight / charHeight;
+
+    // Create glitch displacement map that changes per frame
+    const seed = frameCount * 12345; // Different seed per frame
+    
+    for (let charY = 0; charY < charHeight; charY++) {
+        characters[charY] = [];
+        colors[charY] = [];
+
+        for (let charX = 0; charX < charWidth; charX++) {
+            // Random number generator seeded by position and frame
+            const hash = Math.abs(Math.sin((charX + charY * charWidth + seed) * 0.1) * 10000);
+            const rand = hash - Math.floor(hash);
+            
+            // Decide if this chunk gets displaced (based on glitch intensity)
+            const glitchChance = glitchIntensity / 20; // Convert to probability
+            let pixelX = Math.floor(charX * regionWidth);
+            let pixelY = Math.floor(charY * regionHeight);
+            
+            if (rand < glitchChance) {
+                // Randomly pull from a different part of the image
+                const offsetX = Math.floor((Math.sin(hash * 1.3) * glitchIntensity + glitchIntensity) * regionWidth);
+                const offsetY = Math.floor((Math.cos(hash * 1.7) * glitchIntensity + glitchIntensity) * regionHeight);
+                
+                pixelX = (pixelX + offsetX) % imgWidth;
+                pixelY = (pixelY + offsetY) % imgHeight;
+            }
+
+            const sampled = sampleRegion(
+                imageData,
+                pixelX,
+                pixelY,
+                Math.ceil(regionWidth),
+                Math.ceil(regionHeight)
+            );
+
+            characters[charY][charX] = pixelToCharacter(sampled.brightness);
+            colors[charY][charX] = {
+                r: sampled.r,
+                g: sampled.g,
+                b: sampled.b
+            };
+        }
+    }
+
+    return { characters, colors };
+}
+
 // ============================================================================
 // CANVAS RENDERING
 // ============================================================================
@@ -518,6 +910,164 @@ function renderASCIIFrame(asciiFrame, canvas, fontSize, charHeight) {
             ctx.fillText(char, pixelX, pixelY);
         }
     }
+    
+    // Apply effects
+    applyEffects(ctx, canvas.width, canvas.height);
+}
+
+/**
+ * Apply post-processing effects to canvas
+ */
+function applyEffects(ctx, width, height) {
+    const canvas = ctx.canvas;
+    
+    // Build CSS filter string
+    let filterString = '';
+    
+    if (saturation !== 100) {
+        filterString += `saturate(${saturation / 100}) `;
+    }
+    
+    if (hue !== 0) {
+        filterString += `hue-rotate(${hue}deg) `;
+    }
+    
+    if (grayscale !== 0) {
+        filterString += `grayscale(${grayscale / 100}) `;
+    }
+    
+    if (invert !== 0) {
+        filterString += `invert(${invert / 100}) `;
+    }
+    
+    if (blur !== 0) {
+        filterString += `blur(${blur}px) `;
+    }
+    
+    if (sepia !== 0) {
+        filterString += `sepia(${sepia / 100}) `;
+    }
+    
+    if (brightnessBoost !== 0) {
+        filterString += `brightness(${1 + brightnessBoost / 100}) `;
+    }
+    
+    // Warmth: shift toward warmer (orange) or cooler (blue) tones
+    if (warmth > 0) {
+        // Warm: increase red, decrease blue
+        filterString += `drop-shadow(0 0 ${warmth}px rgba(255, 100, 0, 0.3)) `;
+    } else if (warmth < 0) {
+        // Cool: increase blue, decrease red
+        filterString += `drop-shadow(0 0 ${Math.abs(warmth)}px rgba(0, 100, 255, 0.3)) `;
+    }
+    
+    // Apply all CSS filters to canvas
+    canvas.style.filter = filterString || 'none';
+    
+    // Opacity effect
+    if (opacity !== 100) {
+        canvas.style.opacity = opacity / 100;
+    } else {
+        canvas.style.opacity = 1;
+    }
+    
+    // Brightness effect (canvas-based overlay)
+    if (brightness !== 0) {
+        ctx.fillStyle = `rgba(255, 255, 255, ${Math.abs(brightness) / 200})`;
+        if (brightness > 0) {
+            ctx.fillRect(0, 0, width, height);
+        } else {
+            ctx.fillStyle = `rgba(0, 0, 0, ${Math.abs(brightness) / 200})`;
+            ctx.fillRect(0, 0, width, height);
+        }
+    }
+
+    // Contrast effect
+    if (contrast !== 100) {
+        const imageData = ctx.getImageData(0, 0, width, height);
+        const data = imageData.data;
+        const factor = (259 * (contrast + 255)) / (255 * (259 - contrast));
+        
+        for (let i = 0; i < data.length; i += 4) {
+            data[i] = Math.min(255, factor * (data[i] - 128) + 128);
+            data[i + 1] = Math.min(255, factor * (data[i + 1] - 128) + 128);
+            data[i + 2] = Math.min(255, factor * (data[i + 2] - 128) + 128);
+        }
+        ctx.putImageData(imageData, 0, 0);
+    }
+
+    // Glow effect - add bright outer glow
+    if (glow > 0) {
+        const imageData = ctx.getImageData(0, 0, width, height);
+        const data = imageData.data;
+        const glowAmount = glow / 10;
+        
+        for (let i = 0; i < data.length; i += 4) {
+            data[i] = Math.min(255, data[i] + glowAmount * 20);
+            data[i + 1] = Math.min(255, data[i + 1] + glowAmount * 20);
+            data[i + 2] = Math.min(255, data[i + 2] + glowAmount * 20);
+        }
+        ctx.putImageData(imageData, 0, 0);
+    }
+
+    // Shadow effect - darken for depth
+    if (shadow > 0) {
+        ctx.fillStyle = `rgba(0, 0, 0, ${shadow / 40})`;
+        ctx.fillRect(0, 0, width, height);
+    }
+
+    // Vignette effect
+    if (vignette > 0) {
+        const gradient = ctx.createRadialGradient(width / 2, height / 2, 0, width / 2, height / 2, Math.sqrt(width * width + height * height) / 2);
+        gradient.addColorStop(0, `rgba(0, 0, 0, 0)`);
+        gradient.addColorStop(1, `rgba(0, 0, 0, ${vignette})`);
+        ctx.fillStyle = gradient;
+        ctx.fillRect(0, 0, width, height);
+    }
+}
+
+/**
+ * Render ASCII frame with waving flag effect (loops continuously)
+ */
+function renderASCIIFrameWithFlag(asciiFrame, canvas, fontSize, charHeight, progress) {
+    const ctx = canvas.getContext('2d');
+
+    // Clear canvas
+    ctx.fillStyle = '#000000';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    // Set font
+    ctx.font = `${fontSize}px ${currentFont}`;
+    ctx.textBaseline = 'top';
+
+    const charWidth = asciiFrame.characters[0].length;
+    const charPixelWidth = canvas.width / charWidth;
+    const charPixelHeight = canvas.height / charHeight;
+
+    // Calculate waving offset using sine wave (loops continuously)
+    const waveOffset = Math.sin(progress * Math.PI * 2) * flagDistance * flagSpeed / 30;
+
+    // Draw each character with waving effect
+    for (let y = 0; y < charHeight; y++) {
+        for (let x = 0; x < charWidth; x++) {
+            const char = asciiFrame.characters[y][x];
+            const color = asciiFrame.colors[y][x];
+
+            // Add per-character vertical variation based on x position (creates wave effect)
+            const charVariation = Math.sin((x * 0.1 + progress * Math.PI * 2) / 2) * flagDistance * flagSpeed / 30;
+            const pixelX = x * charPixelWidth;
+            const pixelY = y * charPixelHeight + waveOffset + charVariation;
+
+            // Set color
+            ctx.fillStyle = `rgb(${color.r}, ${color.g}, ${color.b})`;
+
+            // Draw character
+            ctx.fillText(char, pixelX, pixelY);
+        }
+    }
+    
+    // Apply effects
+    applyEffects(ctx, canvas.width, canvas.height);
 }
 
 /**
@@ -606,6 +1156,25 @@ async function generateVideo() {
                 const zoomCharWidth = getZoomCharWidth(progress);
                 renderCharHeight = Math.round(zoomCharWidth / currentAspectRatio);
                 asciiFrame = convertFrameToASCII(currentImageData, zoomCharWidth, renderCharHeight);
+            } else if (currentMode === 'flag') {
+                // Flag mode: static ASCII with waving animation (loops continuously)
+                if (i === 0) {
+                    asciiFrame = convertFrameToASCII(currentImageData, currentCharWidth, charHeight);
+                    cachedASCIIFrame = asciiFrame;
+                } else {
+                    asciiFrame = cachedASCIIFrame;
+                }
+            } else if (currentMode === 'dither') {
+                // Dither mode: static ASCII with ordered dithering pattern
+                if (i === 0) {
+                    asciiFrame = convertFrameToASCIIDither(currentImageData, currentCharWidth, charHeight);
+                    cachedASCIIFrame = asciiFrame;
+                } else {
+                    asciiFrame = cachedASCIIFrame;
+                }
+            } else if (currentMode === 'glitch') {
+                // Glitch mode: random displacement animation changes every frame
+                asciiFrame = convertFrameToASCIIGlitch(currentImageData, currentCharWidth, charHeight, i);
             }
 
             // Render frame to temporary canvas
@@ -616,7 +1185,14 @@ async function generateVideo() {
             const ctx = tempVideoCanvas.getContext('2d');
             ctx.fillStyle = '#000000';
             ctx.fillRect(0, 0, videoWidth, videoHeight);
-            renderASCIIFrame(asciiFrame, tempVideoCanvas, fontSize, renderCharHeight);
+            
+            // Use flag rendering for flag mode, normal rendering for others
+            if (currentMode === 'flag') {
+                const flagProgress = (i % 30) / 30; // 30-frame cycle (loops continuously)
+                renderASCIIFrameWithFlag(asciiFrame, tempVideoCanvas, fontSize, renderCharHeight, flagProgress);
+            } else {
+                renderASCIIFrame(asciiFrame, tempVideoCanvas, fontSize, renderCharHeight);
+            }
 
             frames.push(ctx.getImageData(0, 0, videoWidth, videoHeight));
             updateProgress(Math.round((i / totalFrames) * 30)); // 0-30% for frame generation
