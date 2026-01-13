@@ -13,7 +13,7 @@ let currentInputType = 'image'; // 'image' or 'video'
 let currentVideoPath = null;
 let currentMode = 'original';
 let currentFont = 'Verdana';
-let currentFPS = 5;
+let currentFPS = 30;
 let currentCharWidth = 200;
 let fixedFontSizeEnabled = false;
 let fixedFontSize = 9;
@@ -2314,14 +2314,16 @@ function generatePreview() {
             }
             asciiFrame = shiftASCIIFrame(baseASCIIFrame, frameCount % currentCharWidthForThisFrame);
         } else if (currentMode === 'zoom') {
-            const progress = (frameCount % 30) / 30; // Cycle every 30 frames (3 seconds)
+            const cycleDurationFrames = currentFPS * 3; // 3 second cycle
+            const progress = (frameCount % cycleDurationFrames) / cycleDurationFrames;
             const zoomCharWidth = getZoomCharWidth(progress);
             renderCharHeight = Math.round(zoomCharWidth / currentAspectRatio);
             asciiFrame = convertFrameToASCII(currentImageData, zoomCharWidth, renderCharHeight);
         } else if (currentMode === 'flag') {
             // Flag mode: static ASCII with waving animation (loops continuously)
             asciiFrame = convertFrameToASCII(currentImageData, currentCharWidthForThisFrame, charHeight);
-            const flagProgress = (frameCount % 30) / 30; // Cycle every 30 frames, loops continuously
+            const cycleDurationFrames = currentFPS * 3; // 3 second cycle
+            const flagProgress = (frameCount % cycleDurationFrames) / cycleDurationFrames;
             renderASCIIFrameWithFlag(asciiFrame, outputCanvas, fontSize, renderCharHeight, flagProgress);
             frameCount++;
             return; // Skip normal render, handled by renderASCIIFrameWithFlag
@@ -3026,8 +3028,8 @@ async function generateVideoFromVideo(videoPath, onProgress) {
                     } else if (currentMode === 'scroll') {
                         asciiFrame = convertFrameToASCII(frameData, asciiResolutionForFrame, charHeight);
                     } else if (currentMode === 'zoom') {
-                        // Match preview timing: 30 frames at currentFPS = cycle duration in seconds
-                        const cycleDurationSeconds = 30 / currentFPS;
+                        // Match preview timing: 3 second cycle
+                        const cycleDurationSeconds = 3;
                         const timeInVideo = frameIndex / videoFPS;
                         const progress = (timeInVideo % cycleDurationSeconds) / cycleDurationSeconds;
                         const zoomCharWidth = getZoomCharWidth(progress);
@@ -3063,8 +3065,8 @@ async function generateVideoFromVideo(videoPath, onProgress) {
                     opacity = asciiOpacityForFrame;
                     
                     if (currentMode === 'flag') {
-                        // Match preview timing: 30 frames at currentFPS = cycle duration in seconds
-                        const cycleDurationSeconds = 30 / currentFPS;
+                        // Match preview timing: 3 second cycle
+                        const cycleDurationSeconds = 3;
                         const timeInVideo = frameIndex / videoFPS;
                         const flagProgress = (timeInVideo % cycleDurationSeconds) / cycleDurationSeconds;
                         renderASCIIFrameWithFlag(asciiFrame, tempVideoCanvas, fontSize, charHeight, flagProgress);
@@ -3379,8 +3381,8 @@ async function generateVideo() {
             
             // Use flag rendering for flag mode, normal rendering for others
             if (currentMode === 'flag') {
-                // Match preview timing: 30 frames at currentFPS = cycle duration in seconds
-                const cycleDurationSeconds = 30 / currentFPS;
+                // Match preview timing: 3 second cycle
+                const cycleDurationSeconds = 3;
                 const timeInVideo = i / framerate; // Current time in seconds
                 const flagProgress = (timeInVideo % cycleDurationSeconds) / cycleDurationSeconds;
                 renderASCIIFrameWithFlag(asciiFrame, tempVideoCanvas, fontSize, renderCharHeight, flagProgress);
