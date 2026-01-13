@@ -2387,7 +2387,7 @@ function generatePreview() {
         } else if (currentMode === 'flag') {
             // Flag mode: static ASCII with waving animation (loops continuously)
             asciiFrame = convertFrameToASCII(currentImageData, currentCharWidthForThisFrame, charHeight);
-            const cycleDurationFrames = currentFPS * 3; // 3 second cycle
+            const cycleDurationFrames = currentFPS * flagCycleDuration; // Configurable cycle duration
             const flagProgress = (frameCount % cycleDurationFrames) / cycleDurationFrames;
             renderASCIIFrameWithFlag(asciiFrame, outputCanvas, fontSize, renderCharHeight, flagProgress);
             frameCount++;
@@ -3137,8 +3137,8 @@ async function generateVideoFromVideo(videoPath, onProgress) {
                     opacity = asciiOpacityForFrame;
                     
                     if (currentMode === 'flag') {
-                        // Match preview timing: 3 second cycle
-                        const cycleDurationSeconds = 3;
+                        // Match preview timing: configurable cycle duration
+                        const cycleDurationSeconds = flagCycleDuration;
                         const timeInVideo = frameIndex / videoFPS;
                         const flagProgress = (timeInVideo % cycleDurationSeconds) / cycleDurationSeconds;
                         renderASCIIFrameWithFlag(asciiFrame, tempVideoCanvas, fontSize, charHeight, flagProgress);
@@ -3424,7 +3424,7 @@ async function generateVideoFromVideoChunked(videoPath, onProgress) {
                         opacity = asciiOpacityForFrame;
                         
                         if (currentMode === 'flag') {
-                            const cycleDurationSeconds = 3;
+                            const cycleDurationSeconds = flagCycleDuration;
                             const timeInVid = frameIndex / videoFPS;
                             const flagProgress = (timeInVid % cycleDurationSeconds) / cycleDurationSeconds;
                             renderASCIIFrameWithFlag(asciiFrame, tempVideoCanvas, fontSize, charHeight, flagProgress);
@@ -3699,8 +3699,8 @@ function generateSingleFrame(frameIndex, params) {
     
     // Use flag rendering for flag mode, normal rendering for others
     if (currentMode === 'flag') {
-        // Match preview timing: 3 second cycle
-        const cycleDurationSeconds = 3;
+        // Match preview timing: configurable cycle duration
+        const cycleDurationSeconds = flagCycleDuration;
         const timeInVideo = frameIndex / framerate; // Current time in seconds
         const flagProgress = (timeInVideo % cycleDurationSeconds) / cycleDurationSeconds;
         renderASCIIFrameWithFlag(asciiFrame, tempVideoCanvas, fontSize, renderCharHeight, flagProgress);
