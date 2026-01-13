@@ -45,6 +45,12 @@ let ffmpegRetryCount = 0;
 let currentVideoElement = null; // Store reference to playing video element
 let currentLoadedType = 'image'; // Track whether 'image' or 'video' is currently loaded
 
+// Memory management - track ObjectURLs to revoke
+let currentVideoObjectURL = null;
+let currentImageObjectURL = null;
+let currentAudioObjectURL = null;
+let currentOverlayObjectURL = null;
+
 // Image Overlay variables
 let overlayImageData = null;
 let overlayEnabled = false;
@@ -1221,6 +1227,12 @@ async function loadDefaultOverlay() {
         const response = await fetch('images/tsr1_cover_v2.png');
         if (response.ok) {
             const blob = await response.blob();
+            
+            // Revoke old overlay ObjectURL
+            if (currentOverlayObjectURL) {
+                URL.revokeObjectURL(currentOverlayObjectURL);
+            }
+            
             const img = new Image();
             img.onload = () => {
                 overlayImageData = img;
@@ -1234,7 +1246,8 @@ async function loadDefaultOverlay() {
                     generatePreview();
                 }
             };
-            img.src = URL.createObjectURL(blob);
+            currentOverlayObjectURL = URL.createObjectURL(blob);
+            img.src = currentOverlayObjectURL;
         }
     } catch (error) {
         // Silently fail if default overlay doesn't exist
@@ -1254,14 +1267,20 @@ async function loadDefaultAudio() {
             // Reset the audio source node
             audioSourceNode = null;
             
-            // Create audio element
+            // Create audio element and clean up old one
             if (audioElement) {
                 audioElement.pause();
                 audioElement.src = '';
             }
             
+            // Revoke old audio ObjectURL
+            if (currentAudioObjectURL) {
+                URL.revokeObjectURL(currentAudioObjectURL);
+            }
+            
             audioElement = new Audio();
-            audioElement.src = URL.createObjectURL(blob);
+            currentAudioObjectURL = URL.createObjectURL(blob);
+            audioElement.src = currentAudioObjectURL;
             audioElement.crossOrigin = 'anonymous';
             
             // Show audio player controls
@@ -1446,14 +1465,20 @@ async function handleAudioInput(e) {
     // Reset the audio source node when loading a new file
     audioSourceNode = null;
     
-    // Create audio element for playback
+    // Create audio element for playback and clean up old one
     if (audioElement) {
         audioElement.pause();
         audioElement.src = '';
     }
     
+    // Revoke old audio ObjectURL
+    if (currentAudioObjectURL) {
+        URL.revokeObjectURL(currentAudioObjectURL);
+    }
+    
     audioElement = new Audio();
-    audioElement.src = URL.createObjectURL(file);
+    currentAudioObjectURL = URL.createObjectURL(file);
+    audioElement.src = currentAudioObjectURL;
     audioElement.crossOrigin = 'anonymous';
     
     // Show audio player controls
@@ -2132,40 +2157,62 @@ function processVideoFile(file) {
         return;
     }
 
-    const reader = new FileReader();
-    reader.onload = (e) => {
-        const videoPath = e.target.result;
-        currentVideoPath = videoPath;
-        
-        // Create video element to extract metadata and first frame
-        const video = document.createElement('video');
-        video.crossOrigin = 'anonymous';
-        
-        video.onloadedmetadata = () => {
-            currentAspectRatio = video.videoWidth / video.videoHeight;
-        };
-        
-        video.oncanplay = () => {
-            currentAspectRatio = video.videoWidth / video.videoHeight;
-            currentVideoElement = video;
-            currentLoadedType = 'video';
-            
-            // Enable looping
-            video.loop = true;
-            
-            // Start real-time video preview
-            generateVideoPreview(video);
-            
-            document.getElementById('actionSection').style.display = 'block';
-            document.getElementById('canvasPlaceholder').style.display = 'none';
-            
-            showStatus('Video loaded successfully. Video is now playing. Click "Generate Video" to create ASCII art video.', 'success');
-        };
-        
-        video.src = videoPath;
-        video.play().catch(() => {});
+    // Clean up previous video resources
+    cleanupVideoResources();
+    
+    // Use ObjectURL instead of DataURL to avoid huge base64 strings in memory
+    const videoURL = URL.createObjectURL(file);
+    currentVideoObjectURL = videoURL;
+    currentVideoPath = videoURL;
+    
+    // Create video element to extract metadata and first frame
+    const video = document.createElement('video');
+    video.crossOrigin = 'anonymous';
+    
+    video.onloadedmetadata = () => {
+        currentAspectRatio = video.videoWidth / video.videoHeight;
     };
-    reader.readAsDataURL(file);
+    
+    video.oncanplay = () => {
+        currentAspectRatio = video.videoWidth / video.videoHeight;
+        currentVideoElement = video;
+        currentLoadedType = 'video';
+        
+        // Enable looping
+        video.loop = true;
+        
+        // Start real-time video preview
+        generateVideoPreview(video);
+        
+        document.getElementById('actionSection').style.display = 'block';
+        document.getElementById('canvasPlaceholder').style.display = 'none';
+        
+        showStatus('Video loaded successfully. Video is now playing. Click "Generate Video" to create ASCII art video.', 'success');
+    };
+    
+    video.src = videoURL;
+    video.play().catch(() => {});
+}
+
+/**
+ * Clean up video resources to free memory
+ */
+function cleanupVideoResources() {
+    // Stop and clean up current video element
+    if (currentVideoElement) {
+        currentVideoElement.pause();
+        currentVideoElement.src = '';
+        currentVideoElement.load();
+        currentVideoElement = null;
+    }
+    
+    // Revoke video ObjectURL
+    if (currentVideoObjectURL) {
+        URL.revokeObjectURL(currentVideoObjectURL);
+        currentVideoObjectURL = null;
+    }
+    
+    currentVideoPath = null;
 }
 
 // ============================================================================
@@ -2176,6 +2223,9 @@ function processVideoFile(file) {
  * Load image and prepare for ASCII conversion
  */
 function loadImage(img) {
+    // Clean up previous video resources if switching from video to image
+    cleanupVideoResources();
+    
     const tempCanvas = document.getElementById('tempCanvas');
     const ctx = tempCanvas.getContext('2d', { willReadFrequently: true });
 
@@ -3490,14 +3540,19 @@ async function generateVideoFromVideoChunked(videoPath, onProgress) {
             
             processedChunks++;
             
-            // Allow garbage collection between chunks
-            await new Promise(resolve => setTimeout(resolve, 50));
+            // Force garbage collection between chunks
+            await new Promise(resolve => setTimeout(resolve, 100));
         }
 
         // Concatenate all chunks
         onProgress(75);
         const videoBlob = await concatenateChunks(chunkNames, helpers);
         window.generatedVideoBlob = videoBlob;
+        
+        // Clean up the source video element used for export (different from preview)
+        video.pause();
+        video.src = '';
+        video.load();
 
         onProgress(100);
         showStatus('Video generated successfully! Click "Download Video" to save.', 'success');
@@ -3536,17 +3591,17 @@ function calculateOptimalChunkSize(totalFrames, width, height) {
     // Memory per frame in bytes (RGBA = 4 bytes per pixel)
     const bytesPerFrame = width * height * 4;
     
-    // Target max memory per chunk: 50MB (very conservative)
-    // For 4K (3840x2160): ~33MB per frame, so 1-2 frames per chunk
-    // For 1080p (1920x1080): ~8MB per frame, so 6 frames per chunk
-    // For 720p (1280x720): ~3.7MB per frame, so 13 frames per chunk
-    const targetChunkMemory = 50 * 1024 * 1024; // 50MB
+    // Target max memory per chunk: 25MB (aggressive to keep memory low)
+    // For 4K (3840x2160): ~33MB per frame, so 1 frame per chunk
+    // For 1080p (1920x1080): ~8MB per frame, so 3 frames per chunk
+    // For 720p (1280x720): ~3.7MB per frame, so 6 frames per chunk
+    const targetChunkMemory = 25 * 1024 * 1024; // 25MB
     
     // Calculate frames per chunk based on memory
     let framesPerChunk = Math.floor(targetChunkMemory / bytesPerFrame);
     
-    // Minimum 1 frame per chunk, maximum 15 frames per chunk for responsiveness
-    framesPerChunk = Math.max(1, Math.min(15, framesPerChunk));
+    // Minimum 1 frame per chunk, maximum 10 frames per chunk for memory safety
+    framesPerChunk = Math.max(1, Math.min(10, framesPerChunk));
     
     // Calculate number of chunks
     const numChunks = Math.ceil(totalFrames / framesPerChunk);
@@ -3758,6 +3813,11 @@ async function generateVideo() {
     }
 
     if (isProcessing) return;
+
+    // Clean up previous generated video to free memory
+    if (window.generatedVideoBlob) {
+        window.generatedVideoBlob = null;
+    }
 
     isProcessing = true;
     const progressSection = document.getElementById('progressSection');
