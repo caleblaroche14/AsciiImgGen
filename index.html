@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AsciiImgGen - HD ASCII Art Video Generator</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>AsciiImgGen</h1>
+            <p class="subtitle">Convert images into HD colored ASCII art videos</p>
+        </header>
+
+        <main>
+            <!-- File Input Section -->
+            <section class="input-section">
+                <div class="file-input-wrapper">
+                    <input 
+                        type="file" 
+                        id="imageInput" 
+                        accept="image/*" 
+                        class="file-input"
+                    >
+                    <label for="imageInput" class="file-input-label">
+                        <span class="upload-icon">📤</span>
+                        <span class="upload-text">Click to upload image or drag & drop</span>
+                        <span class="file-size-hint">(JPG, PNG, WebP supported)</span>
+                    </label>
+                </div>
+            </section>
+
+            <!-- Settings Section -->
+            <section class="settings-section">
+                <div class="settings-group">
+                    <label for="modeSelect">Mode:</label>
+                    <select id="modeSelect" class="input-field">
+                        <option value="original">Original (Static)</option>
+                        <option value="scroll">Scroll (Flowing)</option>
+                        <option value="zoom">Zoom (Resolution)</option>
+                    </select>
+                </div>
+                <div class="settings-group">
+                    <label for="fontSelect">Font:</label>
+                    <select id="fontSelect" class="input-field">
+                        <option value="Verdana">Verdana</option>
+                        <option value="DOS">DOS (dos.ttf)</option>
+                        <option value="Courier New">Courier New</option>
+                        <option value="Monaco">Monaco</option>
+                        <option value="Menlo">Menlo</option>
+                        <option value="Consolas">Consolas</option>
+                        <option value="'Roboto Mono'">Roboto Mono</option>
+                        <option value="'Source Code Pro'">Source Code Pro</option>
+                        <option value="'IBM Plex Mono'">IBM Plex Mono</option>
+                        <option value="'JetBrains Mono'">JetBrains Mono</option>
+                        <option value="Inconsolata">Inconsolata</option>
+                        <option value="'DejaVu Sans Mono'">DejaVu Sans Mono</option>
+                    </select>
+                </div>
+                <div class="settings-group">
+                    <label for="customCharsInput">Custom Characters:</label>
+                    <input 
+                        type="text" 
+                        id="customCharsInput" 
+                        placeholder="Leave empty for default" 
+                        value="" 
+                        class="input-field"
+                        style="width: auto; min-width: 150px;"
+                    >
+                </div>
+                <div class="settings-group">
+                    <label for="resolutionSlider">Resolution: <span id="resolutionValue">200</span>w</label>
+                    <input 
+                        type="range" 
+                        id="resolutionSlider" 
+                        min="30" 
+                        max="300" 
+                        value="200" 
+                        class="input-slider"
+                    >
+                </div>
+                <div class="settings-group">
+                    <label for="fpsSlider">FPS: <span id="fpsValue">5</span></label>
+                    <input 
+                        type="range" 
+                        id="fpsSlider" 
+                        min="1" 
+                        max="30" 
+                        value="5" 
+                        class="input-slider"
+                    >
+                </div>
+                <div class="settings-group" id="zoomSettings" style="display: none;">
+                    <label for="zoomMinSlider">Min Chars: <span id="zoomMinValue">10</span></label>
+                    <input 
+                        type="range" 
+                        id="zoomMinSlider" 
+                        min="1" 
+                        max="1000" 
+                        value="10" 
+                        class="input-slider"
+                    >
+                </div>
+                <div class="settings-group" id="zoomMaxSettings" style="display: none;">
+                    <label for="zoomMaxSlider">Max Chars: <span id="zoomMaxValue">300</span></label>
+                    <input 
+                        type="range" 
+                        id="zoomMaxSlider" 
+                        min="1" 
+                        max="1000" 
+                        value="300" 
+                        class="input-slider"
+                    >
+                </div>
+                <div class="settings-group">
+                    <label for="durationInput">Video Duration (seconds):</label>
+                    <input 
+                        type="number" 
+                        id="durationInput" 
+                        min="1" 
+                        max="30" 
+                        value="5" 
+                        class="input-field"
+                    >
+                </div>
+            </section>
+
+            <!-- Canvas Preview Section -->
+            <section class="canvas-section">
+                <h2>Preview</h2>
+                <div class="canvas-container">
+                    <canvas id="outputCanvas" width="1080" height="1920"></canvas>
+                    <div id="canvasPlaceholder" class="canvas-placeholder">
+                        Upload an image to generate ASCII art preview
+                    </div>
+                </div>
+            </section>
+
+            <!-- Progress Section -->
+            <section class="progress-section" id="progressSection" style="display: none;">
+                <h3>Generating Video...</h3>
+                <div class="progress-bar-container">
+                    <div class="progress-bar" id="progressBar"></div>
+                </div>
+                <p class="progress-text" id="progressText">0%</p>
+                <button id="cancelButton" class="btn btn-secondary">Cancel</button>
+            </section>
+
+            <!-- Action Buttons Section -->
+            <section class="action-section" id="actionSection" style="display: none;">
+                <button id="generateButton" class="btn btn-primary">Generate Video</button>
+                <button id="downloadButton" class="btn btn-success" style="display: none;">
+                    ✓ Download Video
+                </button>
+            </section>
+
+            <!-- Status Messages -->
+            <div id="statusMessage" class="status-message"></div>
+        </main>
+
+        <footer>
+            <p>AsciiImgGen © 2026 | Powered by FFmpeg.wasm</p>
+        </footer>
+    </div>
+
+    <!-- Hidden canvas for image processing -->
+    <canvas id="tempCanvas" style="display: none;"></canvas>
+
+    <!-- FFmpeg.wasm Library -->
+    <script async src="https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.11.6/dist/ffmpeg.min.js"></script>
+    
+    <!-- Main Application Script -->
+    <script src="script.js"></script>
+</body>
+</html>
