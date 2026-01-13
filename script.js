@@ -1131,21 +1131,10 @@ async function loadDefaultOverlay() {
             img.onload = () => {
                 overlayImageData = img;
                 
-                // Enable overlay
-                const overlayEnabledToggle = document.getElementById('overlayEnabledToggle');
-                overlayEnabledToggle.checked = true;
-                overlayEnabled = true;
-                document.getElementById('overlayPositioningControls').style.display = 'grid';
-                document.getElementById('overlayEffectsControls').style.display = 'grid';
-                
-                // Display overlay image - only show HTML element if not in sound reactive mode
+                // Don't auto-enable overlay - just load the image data
+                // User can enable it manually via the toggle
                 const overlayImage = document.getElementById('overlayImage');
                 overlayImage.src = img.src;
-                if (!soundReactiveEnabled) {
-                    overlayImage.style.display = 'block';
-                    updateOverlayPosition();
-                    updateOverlayStyles();
-                }
                 
                 if (currentImageData) {
                     generatePreview();
