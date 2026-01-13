@@ -911,7 +911,10 @@
 
             <!-- Canvas Preview Section -->
             <section class="canvas-section">
-                <h2>Preview</h2>
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                    <h2 style="margin: 0;">Preview</h2>
+                    <button id="fullscreenBtn" class="btn btn-secondary" style="padding: 6px 12px; font-size: 0.9rem;">⛶ Fullscreen</button>
+                </div>
                 <div class="canvas-container" id="canvasContainer">
                     <canvas id="outputCanvas" width="1080" height="1920"></canvas>
                     <div id="overlayContainer" class="overlay-layer-container">

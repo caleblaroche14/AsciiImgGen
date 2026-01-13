@@ -966,3 +966,62 @@ section {
 #audioProgressBar {
     margin-top: 8px;
 }
+
+/* ============================================================================
+   FULLSCREEN MODE
+   ============================================================================ */
+
+body.fullscreen-mode {
+    overflow: hidden;
+}
+
+.canvas-section.fullscreen {
+    position: fixed !important;
+    top: 0 !important;
+    left: 0 !important;
+    right: 0 !important;
+    bottom: 0 !important;
+    width: 100% !important;
+    height: 100% !important;
+    max-width: none !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    border: none !important;
+    background: #000 !important;
+    border-radius: 0 !important;
+    z-index: 9999 !important;
+    display: flex !important;
+    flex-direction: column !important;
+    justify-content: center !important;
+    align-items: center !important;
+}
+
+.canvas-section.fullscreen h2 {
+    display: none;
+}
+
+.canvas-section.fullscreen .canvas-container {
+    width: 100% !important;
+    height: 100% !important;
+    max-width: 100% !important;
+    max-height: 100% !important;
+    padding: 0 !important;
+}
+
+.canvas-section.fullscreen #outputCanvas {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+}
+
+.fullscreen-exit-hint {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    color: #00d4ff;
+    font-size: 0.9rem;
+    background: rgba(0, 0, 0, 0.7);
+    padding: 10px 15px;
+    border-radius: 4px;
+    z-index: 10000;
+}

@@ -163,6 +163,7 @@ document.addEventListener('DOMContentLoaded', () => {
     initializeFFmpeg();
     setupEventListeners();
     loadDefaultImage();
+    setupFullscreenMode();
 });
 
 /**
@@ -217,6 +218,52 @@ async function initializeFFmpeg() {
 
         return setTimeout(initializeFFmpeg, 1000);
     }
+}
+
+/**
+ * Setup fullscreen mode for screen recording
+ */
+function setupFullscreenMode() {
+    const fullscreenBtn = document.getElementById('fullscreenBtn');
+    const canvasSection = document.querySelector('.canvas-section');
+    
+    if (fullscreenBtn) {
+        fullscreenBtn.addEventListener('click', () => {
+            canvasSection.classList.toggle('fullscreen');
+            
+            if (canvasSection.classList.contains('fullscreen')) {
+                fullscreenBtn.textContent = '⛶ Exit Fullscreen';
+                document.body.classList.add('fullscreen-mode');
+                
+                // Add exit hint
+                const hint = document.createElement('div');
+                hint.className = 'fullscreen-exit-hint';
+                hint.textContent = 'Press ESC or click button to exit';
+                document.body.appendChild(hint);
+                
+                // Close any open panels when entering fullscreen
+                const panels = document.querySelectorAll('.overlay-panel:not(.hidden)');
+                panels.forEach(panel => panel.classList.add('hidden'));
+            } else {
+                fullscreenBtn.textContent = '⛶ Fullscreen';
+                document.body.classList.remove('fullscreen-mode');
+                
+                // Remove exit hint
+                const hint = document.querySelector('.fullscreen-exit-hint');
+                if (hint) hint.remove();
+            }
+        });
+    }
+    
+    // ESC key to exit fullscreen
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+            const canvasSection = document.querySelector('.canvas-section');
+            if (canvasSection.classList.contains('fullscreen')) {
+                fullscreenBtn.click();
+            }
+        }
+    });
 }
 
 /**
