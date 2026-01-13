@@ -9,6 +9,8 @@ let currentImageData = null;
 let currentAspectRatio = 1;
 let isProcessing = false;
 let animationLoop = null;
+let currentInputType = 'image'; // 'image' or 'video'
+let currentVideoPath = null;
 let currentMode = 'original';
 let currentFont = 'Verdana';
 let currentFPS = 5;
@@ -36,7 +38,26 @@ let brightnessBoost = 0;
 let warmth = 0;
 let shadow = 0;
 let ffmpegRetryCount = 0;
-const MAX_FFMPEG_RETRIES = 5;
+let currentVideoElement = null; // Store reference to playing video element
+let currentLoadedType = 'image'; // Track whether 'image' or 'video' is currently loaded
+
+// Image Overlay variables
+let overlayImageData = null;
+let overlayEnabled = false;
+let overlayX = 50; // percentage
+let overlayY = 50; // percentage
+let overlaySize = 550; // pixels
+let overlayOpacity = 100; // percentage
+let overlayBlur = 0; // pixels
+let overlayGlow = 0; // intensity
+let overlayShadow = 0; // intensity
+let overlaySaturation = 100; // percentage
+let overlayBrightness = 0; // -100 to 100
+let overlayContrast = 100; // percentage
+let overlayRotation = 0; // degrees
+let isDraggingOverlay = false;
+let dragStartX = 0;
+let dragStartY = 0;
 
 // Character mapping for brightness levels - array of arrays for variation
 const CHARACTER_MAP = [
@@ -80,39 +101,30 @@ async function initializeFFmpeg() {
     try {
         // Wait for FFmpeg to be available in global scope
         if (typeof FFmpeg === 'undefined') {
-            console.log('Waiting for FFmpeg.wasm to load...');
             return setTimeout(initializeFFmpeg, 100);
         }
 
         const FFmpegClass = FFmpeg.FFmpeg;
         if (!FFmpegClass && FFmpeg.createFFmpeg) {
             // Older API: use createFFmpeg
-            console.log('Using legacy FFmpeg API with createFFmpeg');
-            ffmpeg = FFmpeg.createFFmpeg({ log: true });
+            ffmpeg = FFmpeg.createFFmpeg({ log: false });
         } else if (FFmpegClass) {
             // Newer API: use FFmpeg class
             ffmpeg = new FFmpegClass();
         } else {
-            console.log('No valid FFmpeg API found');
             return setTimeout(initializeFFmpeg, 100);
         }
         
         FFmpegModule = FFmpeg;
         
-        console.log('Loading FFmpeg WASM...');
         await ffmpeg.load();
-        
         ffmpegReady = true;
-        console.log('FFmpeg.wasm loaded successfully');
     } catch (error) {
         const errorMsg = error.message || String(error);
         
-        // SharedArrayBuffer error requires special server setup
+        // SharedArrayBuffer error requires special server setup - just continue without video generation
         if (errorMsg.includes('SharedArrayBuffer')) {
-            console.error('SharedArrayBuffer not available - requires CORS headers');
-            console.log('To fix: Run a local server with proper headers or use a different approach');
-            showStatus('Video generation requires running with a proper HTTP server (not file://).', 'error');
-            return; // Don't retry
+            return; // Don't retry or show error, just continue
         }
         
         ffmpegRetryCount++;
@@ -122,7 +134,7 @@ async function initializeFFmpeg() {
             return;
         }
         
-        console.error('Failed to load FFmpeg (attempt', ffmpegRetryCount, '):', error);
+
         return setTimeout(initializeFFmpeg, 1000);
     }
 }
@@ -132,6 +144,7 @@ async function initializeFFmpeg() {
  */
 function setupEventListeners() {
     const imageInput = document.getElementById('imageInput');
+    const videoInput = document.getElementById('videoInput');
     const generateButton = document.getElementById('generateButton');
     const downloadButton = document.getElementById('downloadButton');
     const cancelButton = document.getElementById('cancelButton');
@@ -163,7 +176,16 @@ function setupEventListeners() {
     const customCharsInput = document.getElementById('customCharsInput');
 
     // File input handling
-    imageInput.addEventListener('change', handleFileInput);
+    imageInput.addEventListener('change', handleImageInput);
+    videoInput.addEventListener('change', handleVideoInput);
+
+    // Tab switching
+    document.querySelectorAll('.tab-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            const tab = e.target.dataset.tab;
+            switchInputTab(tab);
+        });
+    });
 
     // Drag and drop support
     document.addEventListener('dragover', (e) => e.preventDefault());
@@ -423,6 +445,138 @@ function setupEventListeners() {
         }
     });
 
+    // Overlay image upload
+    const overlayImageInput = document.getElementById('overlayImageInput');
+    overlayImageInput.addEventListener('change', handleOverlayImageInput);
+
+    // Overlay enabled toggle
+    const overlayEnabledToggle = document.getElementById('overlayEnabledToggle');
+    overlayEnabledToggle.addEventListener('change', (e) => {
+        overlayEnabled = e.target.checked;
+        document.getElementById('overlayPositioningControls').style.display = overlayEnabled ? 'grid' : 'none';
+        document.getElementById('overlayEffectsControls').style.display = overlayEnabled ? 'grid' : 'none';
+        
+        const overlayImage = document.getElementById('overlayImage');
+        if (overlayEnabled && overlayImageData) {
+            overlayImage.style.display = 'block';
+            updateOverlayPosition();
+            updateOverlayStyles();
+        } else {
+            overlayImage.style.display = 'none';
+        }
+        
+        if (currentImageData) {
+            generatePreview();
+        }
+    });
+
+    // Overlay positioning and sizing sliders
+    document.getElementById('overlayXSlider').addEventListener('input', (e) => {
+        overlayX = parseInt(e.target.value);
+        document.getElementById('overlayXValue').textContent = overlayX;
+        updateOverlayPosition();
+        if (currentImageData) {
+            generatePreview();
+        }
+    });
+
+    document.getElementById('overlayYSlider').addEventListener('input', (e) => {
+        overlayY = parseInt(e.target.value);
+        document.getElementById('overlayYValue').textContent = overlayY;
+        updateOverlayPosition();
+        if (currentImageData) {
+            generatePreview();
+        }
+    });
+
+    document.getElementById('overlaySizeSlider').addEventListener('input', (e) => {
+        overlaySize = parseInt(e.target.value);
+        document.getElementById('overlaySizeValue').textContent = overlaySize;
+        updateOverlayPosition();
+        if (currentImageData) {
+            generatePreview();
+        }
+    });
+
+    // Overlay effects sliders
+    document.getElementById('overlayOpacitySlider').addEventListener('input', (e) => {
+        overlayOpacity = parseInt(e.target.value);
+        document.getElementById('overlayOpacityValue').textContent = overlayOpacity;
+        updateOverlayStyles();
+        if (currentImageData) {
+            generatePreview();
+        }
+    });
+
+    document.getElementById('overlayBlurSlider').addEventListener('input', (e) => {
+        overlayBlur = parseFloat(e.target.value);
+        document.getElementById('overlayBlurValue').textContent = overlayBlur.toFixed(1);
+        updateOverlayStyles();
+        if (currentImageData) {
+            generatePreview();
+        }
+    });
+
+    document.getElementById('overlayGlowSlider').addEventListener('input', (e) => {
+        overlayGlow = parseFloat(e.target.value);
+        document.getElementById('overlayGlowValue').textContent = overlayGlow.toFixed(1);
+        updateOverlayStyles();
+        if (currentImageData) {
+            generatePreview();
+        }
+    });
+
+    document.getElementById('overlayShadowSlider').addEventListener('input', (e) => {
+        overlayShadow = parseFloat(e.target.value);
+        document.getElementById('overlayShadowValue').textContent = overlayShadow.toFixed(1);
+        updateOverlayStyles();
+        if (currentImageData) {
+            generatePreview();
+        }
+    });
+
+    document.getElementById('overlaySaturationSlider').addEventListener('input', (e) => {
+        overlaySaturation = parseInt(e.target.value);
+        document.getElementById('overlaySaturationValue').textContent = overlaySaturation;
+        updateOverlayStyles();
+        if (currentImageData) {
+            generatePreview();
+        }
+    });
+
+    document.getElementById('overlayBrightnessSlider').addEventListener('input', (e) => {
+        overlayBrightness = parseInt(e.target.value);
+        document.getElementById('overlayBrightnessValue').textContent = overlayBrightness;
+        updateOverlayStyles();
+        if (currentImageData) {
+            generatePreview();
+        }
+    });
+
+    document.getElementById('overlayContrastSlider').addEventListener('input', (e) => {
+        overlayContrast = parseInt(e.target.value);
+        document.getElementById('overlayContrastValue').textContent = overlayContrast;
+        updateOverlayStyles();
+        if (currentImageData) {
+            generatePreview();
+        }
+    });
+
+    document.getElementById('overlayRotationSlider').addEventListener('input', (e) => {
+        overlayRotation = parseInt(e.target.value);
+        document.getElementById('overlayRotationValue').textContent = overlayRotation;
+        updateOverlayPosition();
+        if (currentImageData) {
+            generatePreview();
+        }
+    });
+
+    // Overlay image drag and drop support
+    const overlayImage = document.getElementById('overlayImage');
+    overlayImage.addEventListener('mousedown', startDraggingOverlay);
+    document.addEventListener('mousemove', dragOverlay);
+    document.addEventListener('mouseup', stopDraggingOverlay);
+
     // Button handlers
     generateButton.addEventListener('click', generateVideo);
     downloadButton.addEventListener('click', downloadVideo);
@@ -433,6 +587,7 @@ function setupEventListeners() {
  * Load default image on page load
  */
 async function loadDefaultImage() {
+    // Fallback to image if video not found
     try {
         const response = await fetch('images/tsr1_cover_v2.png');
         if (response.ok) {
@@ -440,18 +595,119 @@ async function loadDefaultImage() {
             const img = new Image();
             img.onload = () => {
                 loadImage(img);
+                currentLoadedType = 'image';
                 showStatus('Default image loaded successfully.', 'success');
+                // Load default overlay
+                loadDefaultOverlay();
             };
             img.onerror = () => {
-                console.error('Failed to load image');
                 showStatus('Failed to load default image', 'error');
             };
             img.src = URL.createObjectURL(blob);
-        } else {
-            console.warn('Image fetch failed with status:', response.status);
         }
     } catch (error) {
-        console.error('Error loading default image:', error);
+    }
+}
+
+/**
+ * Load default overlay image
+ */
+async function loadDefaultOverlay() {
+    try {
+        const response = await fetch('images/tsr1_cover_v2.png');
+        if (response.ok) {
+            const blob = await response.blob();
+            const img = new Image();
+            img.onload = () => {
+                overlayImageData = img;
+                
+                // Enable overlay
+                const overlayEnabledToggle = document.getElementById('overlayEnabledToggle');
+                overlayEnabledToggle.checked = true;
+                overlayEnabled = true;
+                document.getElementById('overlayPositioningControls').style.display = 'grid';
+                document.getElementById('overlayEffectsControls').style.display = 'grid';
+                
+                // Display overlay image
+                const overlayImage = document.getElementById('overlayImage');
+                overlayImage.src = img.src;
+                overlayImage.style.display = 'block';
+                updateOverlayPosition();
+                updateOverlayStyles();
+                
+                if (currentImageData) {
+                    generatePreview();
+                }
+            };
+            img.src = URL.createObjectURL(blob);
+        }
+    } catch (error) {
+        // Silently fail if default overlay doesn't exist
+    }
+}
+
+/**
+ * Load default video for preview
+ */
+async function loadDefaultVideo() {
+    try {
+        const response = await fetch('images/testvid.mp4');
+        
+        if (response.ok) {
+            const blob = await response.blob();
+            
+            // Create a mock file-like object with type property
+            const videoFile = new File([blob], 'testvid.mp4', { type: 'video/mp4' });
+            
+            // Read blob as data URL and process
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                const videoPath = e.target.result;
+                currentVideoPath = videoPath;
+                currentInputType = 'video';
+                
+                // Create video element to extract metadata and first frame
+                const video = document.createElement('video');
+                video.crossOrigin = 'anonymous';
+                
+                video.onloadedmetadata = () => {
+                    currentAspectRatio = video.videoWidth / video.videoHeight;
+                };
+                
+                video.oncanplay = () => {
+                    currentAspectRatio = video.videoWidth / video.videoHeight;
+                    currentVideoElement = video;
+                    currentLoadedType = 'video';
+                    
+                    // Enable looping
+                    video.loop = true;
+                    
+                    // Start real-time video preview
+                    generateVideoPreview(video);
+                    
+                    document.getElementById('actionSection').style.display = 'block';
+                    document.getElementById('canvasPlaceholder').style.display = 'none';
+                    
+                    showStatus('Default video loaded successfully. Video is now playing.', 'success');
+                };
+                
+                video.onerror = (e) => {
+                    console.error('Video error event:', e);
+                    showStatus('Error loading video.', 'error');
+                };
+                
+                video.src = videoPath;
+                video.play().catch(() => {});
+            };
+            reader.onerror = () => {
+                showStatus('Error reading video file.', 'error');
+            };
+            reader.readAsDataURL(videoFile);
+        } else {
+            showStatus('Failed to load default video.', 'error');
+        }
+    } catch (error) {
+        showStatus('Error loading default video.', 'error');
     }
 }
 
@@ -460,12 +716,71 @@ async function loadDefaultImage() {
 // ============================================================================
 
 /**
- * Handle file input from file selector
+ * Switch input tabs between image and video
  */
-function handleFileInput(event) {
+function switchInputTab(tab) {
+    currentInputType = tab;
+    
+    // Update button states
+    document.querySelectorAll('.tab-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.tab === tab);
+    });
+    
+    // Show/hide tab content
+    document.querySelectorAll('[data-tab-content]').forEach(el => {
+        el.style.display = el.dataset.tabContent === tab ? 'block' : 'none';
+    });
+    
+    // Stop video if switching away from video tab
+    if (tab !== 'video' && currentVideoElement) {
+        currentVideoElement.pause();
+        currentVideoElement.currentTime = 0;
+    }
+    
+    // Clear any running animation loops
+    if (animationLoop) {
+        if (typeof animationLoop === 'number') {
+            clearInterval(animationLoop); // for setInterval loops
+            cancelAnimationFrame(animationLoop); // also try cancelAnimationFrame
+        } else {
+            cancelAnimationFrame(animationLoop); // for requestAnimationFrame loops
+        }
+        animationLoop = null;
+    }
+    
+    // Load default content for the tab if nothing of this type is loaded yet
+    if (tab === 'video' && currentLoadedType !== 'video') {
+        loadDefaultVideo();
+    } else if (tab === 'image') {
+        if (currentLoadedType !== 'image') {
+            loadDefaultImage();
+        } else if (currentImageData) {
+            // If image is already loaded, regenerate the preview and show UI elements
+            document.getElementById('actionSection').style.display = 'block';
+            document.getElementById('canvasPlaceholder').style.display = 'none';
+            document.getElementById('outputCanvas').style.display = 'block';
+            generatePreview();
+        }
+    }
+}
+
+/**
+ * Handle image file input from file selector
+ */
+function handleImageInput(event) {
     const file = event.target.files[0];
     if (file) {
         processImageFile(file);
+    }
+}
+
+/**
+ * Handle video file input from file selector
+ */
+function handleVideoInput(event) {
+    const file = event.target.files[0];
+    if (file) {
+        processVideoFile(file);
     }
 }
 
@@ -475,10 +790,210 @@ function handleFileInput(event) {
 function handleFileDrop(event) {
     event.preventDefault();
     const files = event.dataTransfer.files;
-    if (files.length > 0 && files[0].type.startsWith('image/')) {
-        processImageFile(files[0]);
+    if (files.length === 0) return;
+    
+    const file = files[0];
+    if (file.type.startsWith('image/')) {
+        switchInputTab('image');
+        processImageFile(file);
+    } else if (file.type.startsWith('video/')) {
+        switchInputTab('video');
+        processVideoFile(file);
     } else {
-        showStatus('Please drop a valid image file', 'error');
+        showStatus('Please drop a valid image or video file', 'error');
+    }
+}
+
+/**
+ * Handle overlay image input from file selector
+ */
+function handleOverlayImageInput(event) {
+    const file = event.target.files[0];
+    if (file && file.type.startsWith('image/')) {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            const img = new Image();
+            img.onload = () => {
+                overlayImageData = img;
+                showStatus('Overlay image loaded successfully', 'success');
+                
+                // Enable overlay if image loaded
+                if (!overlayEnabled) {
+                    document.getElementById('overlayEnabledToggle').checked = true;
+                    overlayEnabled = true;
+                    document.getElementById('overlayPositioningControls').style.display = 'grid';
+                    document.getElementById('overlayEffectsControls').style.display = 'grid';
+                }
+                
+                // Display overlay image
+                const overlayImage = document.getElementById('overlayImage');
+                overlayImage.src = img.src;
+                overlayImage.style.display = 'block';
+                updateOverlayPosition();
+                updateOverlayStyles();
+                
+                if (currentImageData) {
+                    generatePreview();
+                }
+            };
+            img.onerror = () => {
+                showStatus('Failed to load overlay image', 'error');
+            };
+            img.src = e.target.result;
+        };
+        reader.readAsDataURL(file);
+    }
+}
+
+/**
+ * Update overlay image position and size
+ */
+function updateOverlayPosition() {
+    const overlayImage = document.getElementById('overlayImage');
+    const canvasContainer = document.getElementById('canvasContainer');
+    
+    if (!overlayImage || !canvasContainer) return;
+    
+    const containerRect = canvasContainer.getBoundingClientRect();
+    const containerWidth = containerRect.width;
+    const containerHeight = containerRect.height;
+    
+    // Calculate position based on percentage
+    const x = (containerWidth * overlayX) / 100 - (overlaySize / 2);
+    const y = (containerHeight * overlayY) / 100 - (overlaySize / 2);
+    
+    overlayImage.style.left = x + 'px';
+    overlayImage.style.top = y + 'px';
+    overlayImage.style.width = overlaySize + 'px';
+    overlayImage.style.height = overlaySize + 'px';
+    overlayImage.style.transform = `rotate(${overlayRotation}deg)`;
+}
+
+/**
+ * Update overlay image styles (effects)
+ */
+function updateOverlayStyles() {
+    const overlayImage = document.getElementById('overlayImage');
+    if (!overlayImage) return;
+    
+    // Build filter string
+    let filters = [];
+    
+    if (overlayBlur > 0) {
+        filters.push(`blur(${overlayBlur}px)`);
+    }
+    
+    if (overlayBrightness !== 0) {
+        filters.push(`brightness(${100 + overlayBrightness}%)`);
+    }
+    
+    if (overlayContrast !== 100) {
+        filters.push(`contrast(${overlayContrast}%)`);
+    }
+    
+    if (overlaySaturation !== 100) {
+        filters.push(`saturate(${overlaySaturation}%)`);
+    }
+    
+    // Apply filters
+    if (filters.length > 0) {
+        overlayImage.style.filter = filters.join(' ');
+    } else {
+        overlayImage.style.filter = 'none';
+    }
+    
+    // Apply opacity
+    overlayImage.style.opacity = overlayOpacity / 100;
+    
+    // Apply glow effect using box-shadow
+    if (overlayGlow > 0) {
+        const glowColor = `rgba(0, 212, 255, ${0.3 + (overlayGlow * 0.05)})`;
+        const glowSize = Math.ceil(overlayGlow * 2);
+        overlayImage.style.boxShadow = `0 0 ${glowSize}px ${glowColor}, inset 0 0 ${glowSize}px ${glowColor}`;
+    } else {
+        overlayImage.style.boxShadow = 'none';
+    }
+    
+    // Apply shadow effect
+    if (overlayShadow > 0) {
+        const shadowSize = Math.ceil(overlayShadow);
+        overlayImage.style.boxShadow = `${shadowSize}px ${shadowSize}px ${shadowSize * 2}px rgba(0, 0, 0, ${0.3 + (overlayShadow * 0.03)})`;
+    }
+}
+
+/**
+ * Start dragging overlay image
+ */
+function startDraggingOverlay(e) {
+    if (!overlayEnabled || !overlayImageData) return;
+    
+    isDraggingOverlay = true;
+    dragStartX = e.clientX;
+    dragStartY = e.clientY;
+    
+    const overlayImage = document.getElementById('overlayImage');
+    overlayImage.classList.add('dragging');
+}
+
+/**
+ * Drag overlay image
+ */
+function dragOverlay(e) {
+    if (!isDraggingOverlay) return;
+    
+    const overlayImage = document.getElementById('overlayImage');
+    const canvasContainer = document.getElementById('canvasContainer');
+    
+    if (!overlayImage || !canvasContainer) return;
+    
+    const deltaX = e.clientX - dragStartX;
+    const deltaY = e.clientY - dragStartY;
+    
+    const containerRect = canvasContainer.getBoundingClientRect();
+    const containerWidth = containerRect.width;
+    const containerHeight = containerRect.height;
+    
+    // Calculate new position
+    let currentX = (overlayX * containerWidth) / 100 - (overlaySize / 2);
+    let currentY = (overlayY * containerHeight) / 100 - (overlaySize / 2);
+    
+    currentX += deltaX;
+    currentY += deltaY;
+    
+    // Constrain within bounds
+    currentX = Math.max(0, Math.min(currentX, containerWidth - overlaySize));
+    currentY = Math.max(0, Math.min(currentY, containerHeight - overlaySize));
+    
+    // Update percentages
+    overlayX = Math.round(((currentX + overlaySize / 2) / containerWidth) * 100);
+    overlayY = Math.round(((currentY + overlaySize / 2) / containerHeight) * 100);
+    
+    // Update sliders
+    document.getElementById('overlayXSlider').value = overlayX;
+    document.getElementById('overlayYSlider').value = overlayY;
+    document.getElementById('overlayXValue').textContent = overlayX;
+    document.getElementById('overlayYValue').textContent = overlayY;
+    
+    updateOverlayPosition();
+    
+    dragStartX = e.clientX;
+    dragStartY = e.clientY;
+}
+
+/**
+ * Stop dragging overlay image
+ */
+function stopDraggingOverlay() {
+    if (!isDraggingOverlay) return;
+    
+    isDraggingOverlay = false;
+    
+    const overlayImage = document.getElementById('overlayImage');
+    overlayImage.classList.remove('dragging');
+    
+    // Regenerate preview
+    if (currentImageData) {
+        generatePreview();
     }
 }
 
@@ -505,6 +1020,51 @@ function processImageFile(file) {
     reader.readAsDataURL(file);
 }
 
+/**
+ * Process uploaded video file
+ */
+function processVideoFile(file) {
+    if (!file.type.startsWith('video/')) {
+        showStatus('Invalid file type. Please upload a video.', 'error');
+        return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+        const videoPath = e.target.result;
+        currentVideoPath = videoPath;
+        
+        // Create video element to extract metadata and first frame
+        const video = document.createElement('video');
+        video.crossOrigin = 'anonymous';
+        
+        video.onloadedmetadata = () => {
+            currentAspectRatio = video.videoWidth / video.videoHeight;
+        };
+        
+        video.oncanplay = () => {
+            currentAspectRatio = video.videoWidth / video.videoHeight;
+            currentVideoElement = video;
+            currentLoadedType = 'video';
+            
+            // Enable looping
+            video.loop = true;
+            
+            // Start real-time video preview
+            generateVideoPreview(video);
+            
+            document.getElementById('actionSection').style.display = 'block';
+            document.getElementById('canvasPlaceholder').style.display = 'none';
+            
+            showStatus('Video loaded successfully. Video is now playing. Click "Generate Video" to create ASCII art video.', 'success');
+        };
+        
+        video.src = videoPath;
+        video.play().catch(() => {});
+    };
+    reader.readAsDataURL(file);
+}
+
 // ============================================================================
 // IMAGE LOADING & PROCESSING
 // ============================================================================
@@ -514,7 +1074,7 @@ function processImageFile(file) {
  */
 function loadImage(img) {
     const tempCanvas = document.getElementById('tempCanvas');
-    const ctx = tempCanvas.getContext('2d');
+    const ctx = tempCanvas.getContext('2d', { willReadFrequently: true });
 
     // Store aspect ratio for output scaling
     currentAspectRatio = img.width / img.height;
@@ -537,6 +1097,102 @@ function loadImage(img) {
     document.getElementById('canvasPlaceholder').style.display = 'none';
 
     showStatus('Image loaded successfully. Click "Generate Video" to create ASCII art video.', 'success');
+}
+
+/**
+ * Generate real-time ASCII art preview from playing video
+ */
+function generateVideoPreview(videoElement) {
+    if (!videoElement) return;
+
+    const outputCanvas = document.getElementById('outputCanvas');
+    const fontSize = calculateFontSize(OUTPUT_WIDTH, CHAR_WIDTH);
+    const canvasHeight = Math.round(OUTPUT_WIDTH / currentAspectRatio);
+    const charHeight = Math.round(canvasHeight / fontSize / 1.2);
+    
+    outputCanvas.width = OUTPUT_WIDTH;
+    outputCanvas.height = canvasHeight;
+
+    // Stop any existing animation loop
+    if (animationLoop) clearInterval(animationLoop);
+
+    // Create temporary canvas for reading video frames
+    const tempCanvas = document.createElement('canvas');
+    tempCanvas.width = videoElement.videoWidth;
+    tempCanvas.height = videoElement.videoHeight;
+    const tempCtx = tempCanvas.getContext('2d', { willReadFrequently: true });
+    
+    // Cache context and pre-calculate values
+    const ctx = outputCanvas.getContext('2d', { willReadFrequently: true });
+    ctx.font = `${fontSize}px ${currentFont}`;
+    ctx.textBaseline = 'top';
+    
+    const charWidth = CHAR_WIDTH;
+    const charPixelWidth = OUTPUT_WIDTH / charWidth;
+    const charPixelHeight = canvasHeight / charHeight;
+    let needsBrightnessBoost = false;
+
+    // Use requestAnimationFrame for smooth video playback
+    const renderFrame = () => {
+        if (!videoElement.paused || videoElement.ended === false) {
+            // Draw current video frame
+            tempCtx.drawImage(videoElement, 0, 0);
+            const frameData = tempCtx.getImageData(0, 0, videoElement.videoWidth, videoElement.videoHeight);
+
+            // Quick brightness check (sample only for performance)
+            let avgBrightness = 0;
+            const data = frameData.data;
+            const sampleSize = Math.max(1, Math.floor(data.length / 400)); // Sample 1/100th of pixels
+            for (let i = 0; i < data.length; i += sampleSize * 4) {
+                avgBrightness += (0.299 * data[i] + 0.587 * data[i+1] + 0.114 * data[i+2]) / 255;
+            }
+            avgBrightness /= (data.length / (sampleSize * 4));
+            
+            // Boost brightness once if needed
+            if (avgBrightness < 0.3 && !needsBrightnessBoost) {
+                needsBrightnessBoost = true;
+                const brightnessMultiplier = 0.6 / Math.max(avgBrightness, 0.01);
+                for (let i = 0; i < data.length; i += 4) {
+                    data[i] = Math.min(255, data[i] * brightnessMultiplier);
+                    data[i+1] = Math.min(255, data[i+1] * brightnessMultiplier);
+                    data[i+2] = Math.min(255, data[i+2] * brightnessMultiplier);
+                }
+            }
+
+            // Convert frame to ASCII
+            const asciiFrame = convertFrameToASCII(frameData, charWidth, charHeight);
+
+            // Render to output canvas
+            ctx.fillStyle = '#000000';
+            ctx.fillRect(0, 0, OUTPUT_WIDTH, canvasHeight);
+
+            const characters = asciiFrame.characters;
+            const colors = asciiFrame.colors;
+            
+            for (let y = 0; y < charHeight; y++) {
+                const charsRow = characters[y];
+                const colorsRow = colors[y];
+                for (let x = 0; x < charWidth; x++) {
+                    const char = charsRow[x];
+                    const color = colorsRow[x];
+
+                    const pixelX = x * charPixelWidth;
+                    const pixelY = y * charPixelHeight;
+
+                    ctx.fillStyle = `rgb(${color.r},${color.g},${color.b})`;
+                    ctx.fillText(char, pixelX, pixelY);
+                }
+            }
+
+            applyEffects(ctx, OUTPUT_WIDTH, canvasHeight);
+        }
+
+        animationLoop = requestAnimationFrame(renderFrame);
+    };
+
+    // Start the video and rendering loop
+    videoElement.play().catch(() => {});
+    renderFrame();
 }
 
 /**
@@ -567,7 +1223,7 @@ function generatePreview() {
     const frameInterval = 1000 / currentFPS;
     
     animationLoop = setInterval(() => {
-        const ctx = outputCanvas.getContext('2d');
+        const ctx = outputCanvas.getContext('2d', { willReadFrequently: true });
 
         // Clear canvas
         ctx.fillStyle = '#000000';
@@ -720,6 +1376,8 @@ function convertFrameToASCII(imageData, charWidth, charHeight) {
     // Calculate pixel region size
     const regionWidth = imgWidth / charWidth;
     const regionHeight = imgHeight / charHeight;
+
+
 
     for (let charY = 0; charY < charHeight; charY++) {
         characters[charY] = [];
@@ -1082,13 +1740,164 @@ function drawCharacter(ctx, char, x, y, fontSize, color) {
 // ============================================================================
 // VIDEO GENERATION
 // ============================================================================
+// VIDEO GENERATION
+// ============================================================================
+
+/**
+ * Generate ASCII art video from uploaded video with overlayed effects
+ */
+async function generateVideoFromVideo(videoPath, onProgress) {
+    try {
+        const video = document.createElement('video');
+        video.crossOrigin = 'anonymous';
+        video.loop = true; // Enable looping
+        
+        let videoWidth, videoHeight, videoDuration;
+        
+        video.onerror = () => {
+            throw new Error('Failed to load video');
+        };
+        
+        // Wait for metadata to load
+        video.src = videoPath;
+        await new Promise((resolve) => {
+            video.onloadedmetadata = () => {
+                videoWidth = video.videoWidth;
+                videoHeight = video.videoHeight;
+                videoDuration = video.duration;
+                resolve();
+            };
+        });
+
+        currentAspectRatio = videoWidth / videoHeight;
+        
+        const fontSize = calculateFontSize(OUTPUT_WIDTH, CHAR_WIDTH);
+        const outputHeight = Math.round(OUTPUT_WIDTH / currentAspectRatio);
+        const charHeight = Math.round(outputHeight / fontSize / 1.2);
+        
+        // Get desired output duration from UI (default 5 seconds)
+        const outputDuration = parseInt(document.getElementById('durationInput').value) || 5;
+        const videoFPS = 30;
+        const totalFrames = outputDuration * videoFPS;
+        const frames = [];
+        
+        // Extract frames from video with looping support
+        for (let frameIndex = 0; frameIndex < totalFrames; frameIndex++) {
+            // Calculate time in video, looping if necessary
+            const time = (frameIndex / videoFPS) % videoDuration;
+            video.currentTime = time;
+            
+            // Wait for frame to load
+            await new Promise((resolve) => {
+                let seekHandler = null;
+                const timeout = setTimeout(() => {
+                    // Timeout fallback - if seek doesn't work, try playing briefly
+                    if (seekHandler) video.removeEventListener('seeked', seekHandler);
+                    video.play().catch(() => {});
+                    resolve();
+                }, 200);
+                
+                seekHandler = () => {
+                    clearTimeout(timeout);
+                    video.removeEventListener('seeked', seekHandler);
+                    
+                    const canvas = document.createElement('canvas');
+                    canvas.width = videoWidth;
+                    canvas.height = videoHeight;
+                    
+                    const ctx = canvas.getContext('2d');
+                    ctx.drawImage(video, 0, 0);
+                    
+                    const frameData = ctx.getImageData(0, 0, videoWidth, videoHeight);
+                    
+                    // Convert frame to ASCII
+                    let asciiFrame;
+                    
+                    if (currentMode === 'original') {
+                        asciiFrame = convertFrameToASCII(frameData, currentCharWidth, charHeight);
+                    } else if (currentMode === 'scroll') {
+                        asciiFrame = convertFrameToASCII(frameData, currentCharWidth, charHeight);
+                    } else if (currentMode === 'zoom') {
+                        const cycleLength = Math.floor(totalFrames / 3);
+                        const progress = (frameIndex % cycleLength) / cycleLength;
+                        const zoomCharWidth = getZoomCharWidth(progress);
+                        const zoomCharHeight = Math.round(zoomCharWidth / currentAspectRatio);
+                        asciiFrame = convertFrameToASCII(frameData, zoomCharWidth, zoomCharHeight);
+                    } else if (currentMode === 'dither') {
+                        asciiFrame = convertFrameToASCIIDither(frameData, currentCharWidth, charHeight);
+                    } else if (currentMode === 'glitch') {
+                        asciiFrame = convertFrameToASCIIGlitch(frameData, currentCharWidth, charHeight, frameIndex);
+                    } else {
+                        asciiFrame = convertFrameToASCII(frameData, currentCharWidth, charHeight);
+                    }
+                    
+                    // Render ASCII frame
+                    const tempVideoCanvas = document.createElement('canvas');
+                    tempVideoCanvas.width = OUTPUT_WIDTH;
+                    tempVideoCanvas.height = outputHeight;
+                    
+                    const tempCtx = tempVideoCanvas.getContext('2d');
+                    tempCtx.fillStyle = '#000000';
+                    tempCtx.fillRect(0, 0, OUTPUT_WIDTH, outputHeight);
+                    
+                    if (currentMode === 'flag') {
+                        const flagProgress = (frameIndex % 30) / 30;
+                        renderASCIIFrameWithFlag(asciiFrame, tempVideoCanvas, fontSize, charHeight, flagProgress);
+                    } else if (currentMode === 'scroll') {
+                        const shiftedFrame = shiftASCIIFrame(asciiFrame, frameIndex % currentCharWidth);
+                        renderASCIIFrame(shiftedFrame, tempVideoCanvas, fontSize, charHeight);
+                    } else if (currentMode === 'zoom') {
+                        const cycleLength = Math.floor(totalFrames / 3);
+                        const zoomCharWidth = getZoomCharWidth((frameIndex % cycleLength) / cycleLength);
+                        const zoomCharHeight = Math.round(zoomCharWidth / currentAspectRatio);
+                        renderASCIIFrame(asciiFrame, tempVideoCanvas, fontSize, zoomCharHeight);
+                    } else {
+                        renderASCIIFrame(asciiFrame, tempVideoCanvas, fontSize, charHeight);
+                    }
+                    
+                    frames.push(tempCtx.getImageData(0, 0, OUTPUT_WIDTH, outputHeight));
+                    onProgress(Math.round((frameIndex / totalFrames) * 30));
+                    resolve();
+                };
+                
+                video.addEventListener('seeked', seekHandler, { once: true });
+            });
+        }
+
+        // Encode frames to MP4
+        const videoBlob = await encodeToMP4(frames, outputDuration, (percent) => {
+            onProgress(30 + Math.round(percent * 0.7));
+        });
+
+        window.generatedVideoBlob = videoBlob;
+
+        onProgress(100);
+        showStatus('Video generated successfully! Click "Download Video" to save.', 'success');
+        document.getElementById('downloadButton').style.display = 'inline-block';
+
+    } catch (error) {
+        console.error('Error generating video:', error);
+        showStatus(`Error: ${error.message}`, 'error');
+    } finally {
+        isProcessing = false;
+        const progressSection = document.getElementById('progressSection');
+        const actionSection = document.getElementById('actionSection');
+        progressSection.style.display = 'none';
+        actionSection.style.display = 'block';
+        document.getElementById('generateButton').disabled = false;
+        
+        if (currentImageData) {
+            generatePreview();
+        }
+    }
+}
 
 /**
  * Generate video from current image
  */
 async function generateVideo() {
     if (!currentImageData || !ffmpegReady) {
-        showStatus('Please upload an image first or wait for FFmpeg to load.', 'error');
+        showStatus('Please upload an image or video first or wait for FFmpeg to load.', 'error');
         return;
     }
 
@@ -1104,6 +1913,14 @@ async function generateVideo() {
     document.getElementById('generateButton').disabled = true;
 
     try {
+        // If video input, use generateVideoFromVideo instead
+        if (currentInputType === 'video' && currentVideoPath) {
+            await generateVideoFromVideo(currentVideoPath, (percent) => {
+                updateProgress(percent);
+            });
+            return;
+        }
+
         const duration = parseInt(document.getElementById('durationInput').value) || 5;
         const framerate = 30;
         const totalFrames = duration * framerate;
