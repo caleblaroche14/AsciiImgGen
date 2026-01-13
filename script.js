@@ -15,6 +15,8 @@ let currentMode = 'original';
 let currentFont = 'Verdana';
 let currentFPS = 5;
 let currentCharWidth = 200;
+let fixedFontSizeEnabled = false;
+let fixedFontSize = 9;
 let zoomMinChars = 10;
 let zoomMaxChars = 300;
 let customChars = '';
@@ -134,6 +136,9 @@ const CHARACTER_MAP = [
     ['#', '@', '%', '&', 'W', 'M', 'B', '$', 'D']      // 87.5-100% (darkest)
 ];
 
+// Custom character mapping (initialized to defaults)
+let customCharacterMap = CHARACTER_MAP.map(chars => [...chars]);
+
 // Bayer matrix for ordered dithering (4x4 pattern)
 const BAYER_MATRIX_4x4 = [
     [0, 8, 2, 10],
@@ -146,6 +151,9 @@ const CHAR_WIDTH = 200;
 const OUTPUT_WIDTH = 1080;
 const OUTPUT_HEIGHT = 1920;
 const CHAR_REGION_SIZE = OUTPUT_WIDTH / CHAR_WIDTH; // ~5.4px per character
+
+// Export resolution (can be changed by user)
+let exportWidth = 1080;
 
 // ============================================================================
 // INITIALIZATION
@@ -292,6 +300,33 @@ function setupEventListeners() {
             generatePreview();
         }
     });
+
+    // Fixed font size checkbox and slider
+    const fixedFontSizeCheckbox = document.getElementById('fixedFontSizeCheckbox');
+    const fixedFontSizeSlider = document.getElementById('fixedFontSizeSlider');
+    const fixedFontSizeSettings = document.getElementById('fixedFontSizeSettings');
+    const fixedFontSizeValueSpan = document.getElementById('fixedFontSizeValue');
+    
+    if (fixedFontSizeCheckbox) {
+        fixedFontSizeCheckbox.addEventListener('change', (e) => {
+            fixedFontSizeEnabled = e.target.checked;
+            fixedFontSizeSettings.style.display = fixedFontSizeEnabled ? 'block' : 'none';
+            fixedFontSizeValueSpan.style.opacity = fixedFontSizeEnabled ? '1' : '0.5';
+            if (currentImageData) {
+                generatePreview();
+            }
+        });
+    }
+    
+    if (fixedFontSizeSlider) {
+        fixedFontSizeSlider.addEventListener('input', (e) => {
+            fixedFontSize = parseInt(e.target.value);
+            fixedFontSizeValueSpan.textContent = fixedFontSize;
+            if (currentImageData && fixedFontSizeEnabled) {
+                generatePreview();
+            }
+        });
+    }
 
     // FPS slider
     fpsSlider.addEventListener('input', (e) => {
@@ -498,6 +533,24 @@ function setupEventListeners() {
             generatePreview();
         }
     });
+
+    // Brightness level character inputs
+    for (let i = 0; i < 8; i++) {
+        const input = document.getElementById(`charLevel${i}`);
+        if (input) {
+            input.addEventListener('input', (e) => {
+                const chars = e.target.value;
+                if (chars.length > 0) {
+                    customCharacterMap[i] = chars.split('');
+                } else {
+                    customCharacterMap[i] = [...CHARACTER_MAP[i]];
+                }
+                if (currentImageData) {
+                    generatePreview();
+                }
+            });
+        }
+    }
 
     // Overlay image upload
     const overlayImageInput = document.getElementById('overlayImageInput');
@@ -840,6 +893,14 @@ function setupEventListeners() {
     if (exportFullAudioToggle) {
         exportFullAudioToggle.addEventListener('change', (e) => {
             exportFullAudio = e.target.checked;
+        });
+    }
+
+    // Export Resolution dropdown
+    const exportResolutionSelect = document.getElementById('exportResolutionSelect');
+    if (exportResolutionSelect) {
+        exportResolutionSelect.addEventListener('change', (e) => {
+            exportWidth = parseInt(e.target.value);
         });
     }
 
@@ -2065,9 +2126,7 @@ function generateVideoPreview(videoElement) {
     if (!videoElement) return;
 
     const outputCanvas = document.getElementById('outputCanvas');
-    const fontSize = calculateFontSize(OUTPUT_WIDTH, CHAR_WIDTH);
     const canvasHeight = Math.round(OUTPUT_WIDTH / currentAspectRatio);
-    const charHeight = Math.round(canvasHeight / fontSize / 1.2);
     
     outputCanvas.width = OUTPUT_WIDTH;
     outputCanvas.height = canvasHeight;
@@ -2081,19 +2140,25 @@ function generateVideoPreview(videoElement) {
     tempCanvas.height = videoElement.videoHeight;
     const tempCtx = tempCanvas.getContext('2d', { willReadFrequently: true });
     
-    // Cache context and pre-calculate values
+    // Cache context
     const ctx = outputCanvas.getContext('2d', { willReadFrequently: true });
-    ctx.font = `${fontSize}px ${currentFont}`;
     ctx.textBaseline = 'top';
     
-    const charWidth = CHAR_WIDTH;
-    const charPixelWidth = OUTPUT_WIDTH / charWidth;
-    const charPixelHeight = canvasHeight / charHeight;
     let needsBrightnessBoost = false;
 
     // Use requestAnimationFrame for smooth video playback
     const renderFrame = () => {
         if (!videoElement.paused || videoElement.ended === false) {
+            // Recalculate resolution-dependent values each frame to respond to slider changes
+            const charWidth = currentCharWidth;
+            const fontSize = getEffectiveFontSize(OUTPUT_WIDTH, charWidth);
+            const charHeight = Math.round(canvasHeight / fontSize / 1.2);
+            const charPixelWidth = OUTPUT_WIDTH / charWidth;
+            const charPixelHeight = canvasHeight / charHeight;
+            
+            // Update font for current resolution
+            ctx.font = `${fontSize}px ${currentFont}`;
+            
             // Draw current video frame
             tempCtx.drawImage(videoElement, 0, 0);
             const frameData = tempCtx.getImageData(0, 0, videoElement.videoWidth, videoElement.videoHeight);
@@ -2162,19 +2227,15 @@ function generatePreview() {
 
     const outputCanvas = document.getElementById('outputCanvas');
     
-    // Calculate dimensions based on aspect ratio
-    const fontSize = calculateFontSize(OUTPUT_WIDTH, CHAR_WIDTH);
+    // Calculate dimensions based on aspect ratio and current resolution
     const canvasHeight = Math.round(OUTPUT_WIDTH / currentAspectRatio);
-    const charHeight = Math.round(canvasHeight / fontSize / 1.2);
     
     outputCanvas.width = OUTPUT_WIDTH;
     outputCanvas.height = canvasHeight;
 
-    // For scroll mode, generate base frame once
+    // For scroll mode, generate base frame once (will be regenerated if resolution changes)
     let baseASCIIFrame = null;
-    if (currentMode === 'scroll') {
-        baseASCIIFrame = convertFrameToASCII(currentImageData, currentCharWidth, charHeight);
-    }
+    let lastScrollCharWidth = currentCharWidth;
 
     // Start animation loop with fps based on mode
     if (animationLoop) clearInterval(animationLoop);
@@ -2193,7 +2254,6 @@ function generatePreview() {
 
         // Get ASCII frame for this mode
         let asciiFrame = null;
-        let renderCharHeight = charHeight;
         let currentCharWidthForThisFrame = currentCharWidth;
         
         // Apply sound reactive resolution change
@@ -2202,11 +2262,21 @@ function generatePreview() {
             currentCharWidthForThisFrame = Math.max(10, Math.round(currentCharWidth + resolutionAdjust));
         }
         
+        // Calculate font size and char height based on current resolution
+        const fontSize = getEffectiveFontSize(OUTPUT_WIDTH, currentCharWidthForThisFrame);
+        const charHeight = Math.round(canvasHeight / fontSize / 1.2);
+        let renderCharHeight = charHeight;
+        
         if (currentMode === 'original') {
             // Regenerate every frame for random characters
             asciiFrame = convertFrameToASCII(currentImageData, currentCharWidthForThisFrame, charHeight);
         } else if (currentMode === 'scroll') {
-            asciiFrame = shiftASCIIFrame(baseASCIIFrame, frameCount % currentCharWidth);
+            // Regenerate base frame if resolution changed
+            if (!baseASCIIFrame || lastScrollCharWidth !== currentCharWidthForThisFrame) {
+                baseASCIIFrame = convertFrameToASCII(currentImageData, currentCharWidthForThisFrame, charHeight);
+                lastScrollCharWidth = currentCharWidthForThisFrame;
+            }
+            asciiFrame = shiftASCIIFrame(baseASCIIFrame, frameCount % currentCharWidthForThisFrame);
         } else if (currentMode === 'zoom') {
             const progress = (frameCount % 30) / 30; // Cycle every 30 frames (3 seconds)
             const zoomCharWidth = getZoomCharWidth(progress);
@@ -2243,7 +2313,9 @@ function generatePreview() {
             saturation = Math.max(0, soundReactiveEffects.asciiSaturation);
         }
 
-        // Render ASCII to canvas
+        // Render ASCII to canvas with dynamic font size
+        ctx.font = `${fontSize}px ${currentFont}`;
+        ctx.textBaseline = 'top';
         renderASCIIFrame(asciiFrame, outputCanvas, fontSize, renderCharHeight);
         
         // Restore original effects
@@ -2343,9 +2415,9 @@ function pixelToCharacter(brightness) {
         return customChars[Math.floor(Math.random() * customChars.length)];
     }
     
-    // Default mode: use brightness-based mapping
-    const index = Math.floor(brightness * CHARACTER_MAP.length);
-    const charArray = CHARACTER_MAP[Math.min(index, CHARACTER_MAP.length - 1)];
+    // Default mode: use brightness-based mapping with custom character map
+    const index = Math.floor(brightness * customCharacterMap.length);
+    const charArray = customCharacterMap[Math.min(index, customCharacterMap.length - 1)];
     return charArray[Math.floor(Math.random() * charArray.length)];
 }
 
@@ -2558,6 +2630,16 @@ function convertFrameToASCIIGlitch(imageData, charWidth, charHeight, frameCount)
 function calculateFontSize(canvasWidth, charCount) {
     // Account for character width in monospace fonts (roughly 0.6x height)
     return Math.floor(canvasWidth / charCount / 0.6);
+}
+
+/**
+ * Get the effective font size - either fixed or calculated based on resolution
+ */
+function getEffectiveFontSize(canvasWidth, charCount) {
+    if (fixedFontSizeEnabled) {
+        return fixedFontSize;
+    }
+    return calculateFontSize(canvasWidth, charCount);
 }
 
 /**
@@ -2797,8 +2879,8 @@ async function generateVideoFromVideo(videoPath, onProgress) {
 
         currentAspectRatio = videoWidth / videoHeight;
         
-        const fontSize = calculateFontSize(OUTPUT_WIDTH, CHAR_WIDTH);
-        const outputHeight = Math.round(OUTPUT_WIDTH / currentAspectRatio);
+        const fontSize = getEffectiveFontSize(exportWidth, currentCharWidth);
+        const outputHeight = Math.round(exportWidth / currentAspectRatio);
         const charHeight = Math.round(outputHeight / fontSize / 1.2);
         
         // Get desired output duration from UI (default 5 seconds)
@@ -2927,12 +3009,12 @@ async function generateVideoFromVideo(videoPath, onProgress) {
                     
                     // Render ASCII frame
                     const tempVideoCanvas = document.createElement('canvas');
-                    tempVideoCanvas.width = OUTPUT_WIDTH;
+                    tempVideoCanvas.width = exportWidth;
                     tempVideoCanvas.height = outputHeight;
                     
                     const tempCtx = tempVideoCanvas.getContext('2d');
                     tempCtx.fillStyle = '#000000';
-                    tempCtx.fillRect(0, 0, OUTPUT_WIDTH, outputHeight);
+                    tempCtx.fillRect(0, 0, exportWidth, outputHeight);
                     
                     // Store original effect values
                     const origBrightness = brightness;
@@ -2986,7 +3068,7 @@ async function generateVideoFromVideo(videoPath, onProgress) {
                         overlayContrast = overlayContrastForFrame;
                         overlayOpacity = overlayOpacityForFrame;
                         
-                        renderOverlayToCanvas(tempCtx, OUTPUT_WIDTH, outputHeight);
+                        renderOverlayToCanvas(tempCtx, exportWidth, outputHeight);
                         
                         // Restore original overlay values
                         overlaySize = origOverlaySize;
@@ -2995,7 +3077,7 @@ async function generateVideoFromVideo(videoPath, onProgress) {
                         overlayOpacity = origOverlayOpacity;
                     }
                     
-                    frames.push(tempCtx.getImageData(0, 0, OUTPUT_WIDTH, outputHeight));
+                    frames.push(tempCtx.getImageData(0, 0, exportWidth, outputHeight));
                     onProgress(Math.round((frameIndex / totalFrames) * 30));
                     resolve();
                 };
@@ -3079,10 +3161,10 @@ async function generateVideo() {
         if (animationLoop) clearInterval(animationLoop);
 
         // Generate ASCII frame once
-        const fontSize = calculateFontSize(OUTPUT_WIDTH, CHAR_WIDTH);
+        const fontSize = getEffectiveFontSize(exportWidth, currentCharWidth);
 
         // Calculate video dimensions based on aspect ratio
-        const videoWidth = OUTPUT_WIDTH;
+        const videoWidth = exportWidth;
         const videoHeight = Math.round(videoWidth / currentAspectRatio);
         
         // Calculate character grid height based on rendered height

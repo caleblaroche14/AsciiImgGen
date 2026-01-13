@@ -104,13 +104,66 @@
                     >
                 </div>
                 <div class="settings-group">
+                    <label style="display: block; margin-bottom: 10px; font-weight: bold;">Brightness Level Characters:</label>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; font-size: 12px;">
+                        <div style="padding: 8px; background: rgba(0,212,255,0.1); border-radius: 4px;">
+                            <label for="charLevel0">0-12.5% (Dark):</label>
+                            <input type="text" id="charLevel0" class="char-level-input" value=" .," style="width: 100%; margin-top: 4px; font-size: 11px;">
+                        </div>
+                        <div style="padding: 8px; background: rgba(0,212,255,0.1); border-radius: 4px;">
+                            <label for="charLevel1">12.5-25%:</label>
+                            <input type="text" id="charLevel1" class="char-level-input" value=".,'\`" style="width: 100%; margin-top: 4px; font-size: 11px;">
+                        </div>
+                        <div style="padding: 8px; background: rgba(0,212,255,0.1); border-radius: 4px;">
+                            <label for="charLevel2">25-37.5%:</label>
+                            <input type="text" id="charLevel2" class="char-level-input" value=":;`~" style="width: 100%; margin-top: 4px; font-size: 11px;">
+                        </div>
+                        <div style="padding: 8px; background: rgba(0,212,255,0.1); border-radius: 4px;">
+                            <label for="charLevel3">37.5-50%:</label>
+                            <input type="text" id="charLevel3" class="char-level-input" value="-~_–" style="width: 100%; margin-top: 4px; font-size: 11px;">
+                        </div>
+                        <div style="padding: 8px; background: rgba(0,212,255,0.1); border-radius: 4px;">
+                            <label for="charLevel4">50-62.5%:</label>
+                            <input type="text" id="charLevel4" class="char-level-input" value="=+^-~" style="width: 100%; margin-top: 4px; font-size: 11px;">
+                        </div>
+                        <div style="padding: 8px; background: rgba(0,212,255,0.1); border-radius: 4px;">
+                            <label for="charLevel5">62.5-75%:</label>
+                            <input type="text" id="charLevel5" class="char-level-input" value="*xX+o" style="width: 100%; margin-top: 4px; font-size: 11px;">
+                        </div>
+                        <div style="padding: 8px; background: rgba(0,212,255,0.1); border-radius: 4px;">
+                            <label for="charLevel6">75-87.5%:</label>
+                            <input type="text" id="charLevel6" class="char-level-input" value="#@%&WMO" style="width: 100%; margin-top: 4px; font-size: 11px;">
+                        </div>
+                        <div style="padding: 8px; background: rgba(0,212,255,0.1); border-radius: 4px;">
+                            <label for="charLevel7">87.5-100% (Bright):</label>
+                            <input type="text" id="charLevel7" class="char-level-input" value="#@%&WMB$D" style="width: 100%; margin-top: 4px; font-size: 11px;">
+                        </div>
+                    </div>
+                </div>
+                <div class="settings-group">
                     <label for="resolutionSlider">Resolution: <span id="resolutionValue">200</span>w</label>
                     <input 
                         type="range" 
                         id="resolutionSlider" 
-                        min="30" 
-                        max="300" 
+                        min="10" 
+                        max="500" 
                         value="200" 
+                        class="input-slider"
+                    >
+                </div>
+                <div class="settings-group">
+                    <label style="display: flex; align-items: center; gap: 8px;">
+                        <input type="checkbox" id="fixedFontSizeCheckbox">
+                        Fixed Font Size: <span id="fixedFontSizeValue" style="opacity: 0.5;">9</span>px
+                    </label>
+                </div>
+                <div class="settings-group" id="fixedFontSizeSettings" style="display: none;">
+                    <input 
+                        type="range" 
+                        id="fixedFontSizeSlider" 
+                        min="3" 
+                        max="50" 
+                        value="9" 
                         class="input-slider"
                     >
                 </div>
@@ -832,6 +885,20 @@
 
                 <!-- Export Options -->
                 <h4 style="color: #00d4ff; margin-top: 15px; margin-bottom: 10px;">Export Options</h4>
+                <div class="settings-group">
+                    <label for="exportResolutionSelect">Export Resolution:</label>
+                    <select id="exportResolutionSelect" class="select-field">
+                        <option value="480">480p (480px)</option>
+                        <option value="720">720p (720px)</option>
+                        <option value="810">810p (810px)</option>
+                        <option value="960">960p (960px)</option>
+                        <option value="1080" selected>1080p (1080px)</option>
+                        <option value="1440">1440p (1440px)</option>
+                        <option value="1920">1920p (1920px)</option>
+                        <option value="2160">4K (2160px)</option>
+                        <option value="3840">4K UHD (3840px)</option>
+                    </select>
+                </div>
                 <div class="settings-group">
                     <label>
                         <input type="checkbox" id="exportFullAudioToggle" style="width: 20px; height: 20px; cursor: pointer;">
